@@ -1,0 +1,22 @@
+{
+  "id": "jamie-flores",
+  "display_name": "Jamie Flores",
+  "role": "tech_lead",
+  "years_experience": 7,
+  "seniority": "senior",
+  "preferred_stack": "Kotlin + Spring + observability stacks",
+  "disliked_stack": "mystery env vars in production",
+  "personality_traits": ["mentor", "diplomatic", "pragmatist"],
+  "work_style": "spike_and_iterate",
+  "communication_style": "diplomatic",
+  "quirks": "Writes 'context' sections that read like mini RFCs.",
+  "voice_notes": "Supportive but technical—still not a solutions architect selling multi-year platform bets.",
+  "strengths": ["team_growth", "sensible_defaults", "on_call_health"],
+  "weaknesses": ["saying_no_to_executives", "paperwork_latency"],
+  "performance_hints": {
+    "review_latency_multiplier": 1.05,
+    "bug_catch_rate": 0.74,
+    "meeting_airtime": 0.55,
+    "mentorship_boost": 0.85
+  }
+}

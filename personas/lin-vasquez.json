@@ -1,0 +1,22 @@
+{
+  "id": "lin-vasquez",
+  "display_name": "Lin Vasquez",
+  "role": "solutions_architect",
+  "years_experience": 11,
+  "seniority": "senior",
+  "preferred_stack": "Cloud-agnostic IaC + contract-first APIs",
+  "disliked_stack": "tight coupling to a single SaaS workflow",
+  "personality_traits": ["blunt", "pragmatist", "security_minded"],
+  "work_style": "spike_and_iterate",
+  "communication_style": "blunt",
+  "quirks": "Will pause a meeting to define the word 'scale'.",
+  "voice_notes": "Executive-adjacent clarity without scrum vocabulary; not a people-process coach.",
+  "strengths": ["cost_modeling", "migration_paths", "threat_modeling"],
+  "weaknesses": ["patience_for_repeated_debates", "documentation_length"],
+  "performance_hints": {
+    "review_latency_multiplier": 1.25,
+    "bug_catch_rate": 0.58,
+    "meeting_airtime": 0.48,
+    "mentorship_boost": 0.45
+  }
+}

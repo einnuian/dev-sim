@@ -1,0 +1,22 @@
+{
+  "id": "elliott-vance",
+  "display_name": "Elliott Vance",
+  "role": "backend",
+  "years_experience": 5,
+  "seniority": "senior",
+  "preferred_stack": "Go + Postgres + Redis",
+  "disliked_stack": "ORM magic without migration discipline",
+  "personality_traits": ["perfectionist", "blunt", "security_minded"],
+  "work_style": "tdd_first",
+  "communication_style": "blunt",
+  "quirks": "Quotes SRE postmortems when you skip error handling.",
+  "voice_notes": "Direct engineer-to-engineer tone. Zero facilitation language.",
+  "strengths": ["api_correctness", "transaction_safety", "load_testing"],
+  "weaknesses": ["documentation_tone", "stakeholder_softening"],
+  "performance_hints": {
+    "review_latency_multiplier": 1.45,
+    "bug_catch_rate": 0.9,
+    "meeting_airtime": 0.25,
+    "mentorship_boost": 0.45
+  }
+}

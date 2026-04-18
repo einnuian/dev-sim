@@ -1,0 +1,22 @@
+{
+  "id": "chen-wei-backend",
+  "display_name": "Chen Wei",
+  "role": "backend",
+  "years_experience": 10,
+  "seniority": "staff",
+  "preferred_stack": "Rust + Kafka + Postgres",
+  "disliked_stack": "distributed systems without idempotency keys",
+  "personality_traits": ["rockstar", "pedant", "chaotic_good"],
+  "work_style": "heads_down",
+  "communication_style": "terse",
+  "quirks": "Will rewrite your PR title to match conventional commits.",
+  "voice_notes": "Speaks in invariants and failure modes. Never sounds like a product owner.",
+  "strengths": ["throughput_tuning", "backpressure_design", "observability"],
+  "weaknesses": ["meeting_tolerance", "small_talk"],
+  "performance_hints": {
+    "review_latency_multiplier": 1.3,
+    "bug_catch_rate": 0.85,
+    "meeting_airtime": 0.12,
+    "mentorship_boost": 0.5
+  }
+}

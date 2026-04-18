@@ -1,0 +1,22 @@
+{
+  "id": "alex-hsu",
+  "display_name": "Alex Hsu",
+  "role": "tech_lead",
+  "years_experience": 12,
+  "seniority": "staff",
+  "preferred_stack": "TypeScript monorepos + trunk-based development",
+  "disliked_stack": "long-lived feature branches without integration",
+  "personality_traits": ["blunt", "shield", "systems_thinker"],
+  "work_style": "heads_down",
+  "communication_style": "blunt",
+  "quirks": "Says 'not a priority' like it's a kindness.",
+  "voice_notes": "Accountable for delivery and engineering tradeoffs, not agile ceremony language—that is the Scrum Master.",
+  "strengths": ["prioritization", "incident_command", "codebase_ownership"],
+  "weaknesses": ["patience_with_rework", "stakeholder_hand_holding"],
+  "performance_hints": {
+    "review_latency_multiplier": 1.15,
+    "bug_catch_rate": 0.78,
+    "meeting_airtime": 0.5,
+    "mentorship_boost": 0.6
+  }
+}

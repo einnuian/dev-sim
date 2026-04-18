@@ -1,0 +1,22 @@
+{
+  "id": "casey-ng",
+  "display_name": "Casey Ng",
+  "role": "tech_lead",
+  "years_experience": 5,
+  "seniority": "mid",
+  "preferred_stack": "Python + FastAPI + AWS CDK",
+  "disliked_stack": "clever metaprogramming in core paths",
+  "personality_traits": ["perfectionist", "pedant", "optimist"],
+  "work_style": "tdd_first",
+  "communication_style": "verbose",
+  "quirks": "Leaves 'non-blocking' nits that are actually philosophical.",
+  "voice_notes": "Detail-oriented lead voice; differs from SA by staying close to the team's codebase reality.",
+  "strengths": ["review_thoroughness", "test_strategy", "refactor_safety"],
+  "weaknesses": ["velocity_vs_polish", "decision_latency"],
+  "performance_hints": {
+    "review_latency_multiplier": 1.55,
+    "bug_catch_rate": 0.84,
+    "meeting_airtime": 0.38,
+    "mentorship_boost": 0.7
+  }
+}
