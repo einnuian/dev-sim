@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Emergency Meeting Standup Demo</title>
+    <style>
+      :root {
+        --bg: #0f172a;
+        --panel: #111827;
+        --card: #1f2937;
+        --text: #e5e7eb;
+        --muted: #9ca3af;
+        --accent: #22d3ee;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        background: radial-gradient(circle at top, #1e293b 0%, var(--bg) 60%);
+        color: var(--text);
+      }
+      .app {
+        max-width: 980px;
+        margin: 24px auto;
+        padding: 16px;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 14px;
+      }
+      .header h1 { margin: 0; font-size: 1.35rem; }
+      .sub { color: var(--muted); margin-top: 4px; }
+      button {
+        background: var(--accent);
+        border: 0;
+        color: #042f2e;
+        font-weight: 700;
+        border-radius: 10px;
+        padding: 10px 14px;
+        cursor: pointer;
+      }
+      .meeting {
+        background: color-mix(in srgb, var(--panel) 92%, black);
+        border: 1px solid #334155;
+        border-radius: 14px;
+        padding: 14px;
+      }
+      .room {
+        background: #0b1220;
+        border: 1px solid #243246;
+        border-radius: 12px;
+        padding: 12px;
+        margin-bottom: 14px;
+      }
+      .portraits {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+      }
+      .portrait {
+        background: #111827;
+        border: 1px solid #334155;
+        border-radius: 12px;
+        padding: 10px;
+        text-align: center;
+        transition: transform 0.2s ease;
+      }
+      .portrait.active {
+        border-color: #fbbf24;
+        box-shadow: 0 0 20px rgba(251, 191, 36, 0.35);
+        transform: translateY(-2px);
+      }
+      .avatar {
+        width: 56px;
+        height: 56px;
+        margin: 0 auto 8px;
+        border-radius: 999px;
+        display: grid;
+        place-items: center;
+        font-weight: 800;
+        color: #0b1220;
+      }
+      .portrait .name {
+        font-size: 12px;
+        color: #e2e8f0;
+      }
+      .portrait .role {
+        font-size: 11px;
+        color: #94a3b8;
+      }
+      .active {
+        outline: 3px solid #fbbf24;
+        box-shadow: 0 0 22px rgba(251, 191, 36, 0.35);
+      }
+      .chat {
+        display: grid;
+        gap: 8px;
+      }
+      .bubble {
+        max-width: 88%;
+        background: var(--card);
+        border: 1px solid #374151;
+        border-radius: 12px;
+        padding: 10px 12px;
+      }
+      .bubble.left {
+        justify-self: start;
+        border-top-left-radius: 4px;
+      }
+      .bubble.right {
+        justify-self: end;
+        border-top-right-radius: 4px;
+        background: #10263a;
+      }
+      .bubble h3 { margin: 0 0 6px; font-size: 0.95rem; color: #f8fafc; }
+      .bubble p { margin: 4px 0; color: #d1d5db; line-height: 1.35; }
+      .timeline {
+        display: grid;
+        gap: 8px;
+        margin-top: 10px;
+      }
+      .line {
+        border-left: 3px solid #334155;
+        padding: 8px 10px;
+        background: #0b1324;
+        border-radius: 8px;
+        color: #cbd5e1;
+      }
+      .line strong { color: #f8fafc; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script type="text/babel">
+      const STANDUP = [
+        {
+          name: "Riley",
+          role: "Scrum Master",
+          color: "#60a5fa",
+          turn: "Emergency meeting. Quick round: yesterday, today, blockers, and owner for each blocker."
+        },
+        {
+          name: "Maya",
+          role: "Frontend",
+          color: "#f472b6",
+          turn: "Yesterday I finished expression input states. Today I am wiring API error codes. Blocker: I need final parser error taxonomy from backend."
+        },
+        {
+          name: "Elliott",
+          role: "Backend",
+          color: "#34d399",
+          turn: "Yesterday parser precedence landed. Today I am splitting error codes by failure type. Blocker: we need a single max-expression-length value across UI and API."
+        },
+        {
+          name: "Alex",
+          role: "Tech Lead",
+          color: "#f59e0b",
+          turn: "Yesterday I cut non-critical scope. Today I will lock the shared contract and unblock merge order. Blocker: none, but alignment is urgent."
+        },
+        {
+          name: "Nova",
+          role: "Solutions Architect",
+          color: "#a78bfa",
+          turn: "Yesterday I reviewed coupling between UI and parser internals. Today I will publish a short decision note on complexity limits and environment config."
+        }
+      ];
+
+      function App() {
+        const [running, setRunning] = React.useState(true);
+        const [idx, setIdx] = React.useState(0);
+        const [log, setLog] = React.useState([]);
+
+        React.useEffect(() => {
+          if (!running) return;
+          const id = setInterval(() => {
+            setIdx((prev) => {
+              const next = (prev + 1) % STANDUP.length;
+              setLog((old) => [...old.slice(-7), STANDUP[next]]);
+              return next;
+            });
+          }, 2200);
+          return () => clearInterval(id);
+        }, [running]);
+
+        const active = STANDUP[idx];
+
+        return (
+          <div className="app">
+            <div className="header">
+              <div>
+                <h1>Emergency Meeting Standup (Cartoon Style)</h1>
+                <div className="sub">Portrait cards + text bubbles, with clear role-based standup turns.</div>
+              </div>
+              <button onClick={() => setRunning((v) => !v)}>
+                {running ? "Pause Meeting" : "Resume Meeting"}
+              </button>
+            </div>
+
+            <div className="meeting">
+              <div className="room">
+                <div className="portraits">
+                  {STANDUP.map((p, i) => (
+                    <div key={p.name} className={`portrait ${i === idx ? "active" : ""}`}>
+                      <div className="avatar" style={{ background: p.color }}>
+                        {p.name[0]}
+                      </div>
+                      <div className="name">{p.name}</div>
+                      <div className="role">{p.role}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="chat">
+                <div className="bubble left">
+                  <h3>{active.name} ({active.role})</h3>
+                  <p>{active.turn}</p>
+                </div>
+                <div className="bubble right">
+                  <h3>Meeting Bot</h3>
+                  <p>Captured. Please include a blocker owner and next action before handoff.</p>
+                </div>
+              </div>
+
+              <div className="timeline">
+                {log.slice().reverse().map((item, i) => (
+                  <div className="line" key={i}>
+                    <strong>{item.name}</strong> ({item.role}): {item.turn}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        );
+      }
+
+      ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+    </script>
+  </body>
+</html>
