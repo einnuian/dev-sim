@@ -9,17 +9,39 @@ Templates live in **`personas/`** (one file per seed in `personas/*.json`) and *
 3. Optionally prepend the matching **`prompts/roles/<role>.md`** block if you want a longer, role-generic baseline before persona specifics.
 4. For **git subjects / PR titles**, use **`prompts/commits.md`** and set `{{COMMIT_TONE}}` to `standard` or `sass` (spicy / rival-banter commits — see that file for boundaries).
 
+## Workflow phases (matches `devteam.svg`)
+
+| Phase | Who acts | What happens |
+| --- | --- | --- |
+| **1 — Initiation** | Orchestrator (SM) | CEO app idea → backlog draft |
+| **2 — Sprint Planning** | All agents | Review backlog, commit to `{{SPRINT_GOAL}}` |
+| **3 — Execution** | FE, BE, TL, SA, SM | Code, review PRs, run stand-ups on feature branches |
+| **4 — Scoring** | Engine (automatic) | Per-agent score across 6 metrics (see below) |
+| **5 — CEO Decision** | CEO (player) | Keep/fire per agent; optional corporate initiative |
+| **Loop** | Orchestrator (SM) | Updated roster + initiative re-enters Phase 1 |
+
+## Scoring metrics (engine, read-only for agents)
+
+Agents are aware they are evaluated but **do not control** the engine. Metrics:
+`commits & PR size` · `review comments` · `build pass rate` · `time-to-merge` · `in-character quality` · `team-fit signals`
+
+Scoring weights shift when the CEO sets a **corporate initiative** (e.g. "Ship Faster" raises velocity weight).
+
 ## Runtime placeholders (inject from orchestrator)
 
 | Placeholder | Typical source |
 | --- | --- |
-| `{{SPRINT_GOAL}}` | Current sprint objective (TM4 / game state). |
+| `{{SPRINT_GOAL}}` | Current sprint objective. |
+| `{{SPRINT_NUMBER}}` | Sprint index (1, 2, 3 …). |
 | `{{TASK}}` | Assigned task description for this turn. |
 | `{{SCRATCHPAD}}` | Shared team context (stand-up / review thread). |
 | `{{PRIVATE_MEMORY}}` | This agent’s private notes only. |
-| `{{CHANNEL}}` | e.g. `implement`, `pr_review`, `standup`, `retro`, `adr`, **`commit`**. |
+| `{{ROSTER}}` | Current team members (name · role) — updates after fires/hires. |
+| `{{CHANNEL}}` | `orchestrate`, `sprint_planning`, `implement`, `pr_review`, `standup`, `retro`, `adr`, `end_of_sprint`, **`commit`**. |
 | `{{COMMIT_TONE}}` | `standard` (default) or **`sass`** — see **`prompts/commits.md`**. |
+| `{{INITIATIVE}}` | Optional CEO corporate directive for this sprint (e.g. "Add API /v1/"). |
 | `{{DEPARTED_PEER}}` | Optional: id/name when someone left the team. |
+| `{{NEW_HIRE}}` | Optional: id/name + role when a replacement joins (grace period applies). |
 
 Persona files repeat **fixed** fields from JSON so prompts stay token-efficient; refresh from JSON if seeds change.
 
