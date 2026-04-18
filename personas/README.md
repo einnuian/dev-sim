@@ -1,6 +1,6 @@
 # Personas (procedural)
 
-There are no fixed seed teammate JSON files. Unique agents are built from merged pools in `trait_pools.json`.
+There are no fixed seed teammate JSON files. v2 pools in `trait_pools.json` match `schemas/agent.schema.v2.json` (stack tokens, `git_identity`, no per-persona `voice_notes`).
 
 Default output is an LLM system-style prompt (not a JSON description). For structured data use `--format json`.
 
