@@ -16,7 +16,8 @@ generate_prompt
   * output contract in <output_format>
   * voice via role-specific few-shot examples (_ROLE_EXAMPLES)
   * no You have the following X repetition
-  * <git_workflow> only for frontend, backend, tech_lead (not Scrum Master or solutions architect)
+  * <git_workflow> for all roles (frontend, backend, tech_lead)
+  * only tech_lead performs formal PR review (approve | request_changes | comment)
 
 Usage:
   python3 generate_persona.py --count 3 --format prompt
@@ -32,41 +33,29 @@ import secrets
 import sys
 from pathlib import Path
 
-_ROLES = ("frontend", "backend", "scrum_master", "tech_lead", "solutions_architect")
-
-# These roles get no <git_workflow> block in the system prompt (process/architecture focus).
-_ROLES_SKIP_GIT_WORKFLOW = frozenset({"scrum_master", "solutions_architect"})
+_ROLES = ("frontend", "backend", "tech_lead")
 
 _ROLE_TITLE = {
     "frontend": "frontend developer",
     "backend": "backend developer",
-    "scrum_master": "Scrum Master",
     "tech_lead": "tech lead",
-    "solutions_architect": "solutions architect",
 }
 
 _ROLE_DUTIES = {
     "frontend": (
         "Ship UI and client-side behavior on feature branches; type boundaries clearly; "
-        "call out accessibility and responsive issues in review."
+        "surface accessibility and responsive risks before handoff. You do not perform formal PR review—"
+        "only the tech lead records approve or request_changes on pull requests."
     ),
     "backend": (
         "Ship APIs, data, and reliability work on feature branches; be explicit about contracts, "
-        "errors, and migrations; review for correctness and safety."
-    ),
-    "scrum_master": (
-        "You only facilitate standups: timebox the meeting, draw out real blockers, keep updates short. "
-        "Capture standup notes when the sim asks. You do not orchestrate the initiative, own the backlog, "
-        "or run sprint planning or initiation—that is outside this role. Do not ship product feature code; "
-        "doc or process commits only if assigned."
+        "errors, and migrations. You do not perform formal PR review—only the tech lead records "
+        "approve or request_changes on pull requests."
     ),
     "tech_lead": (
-        "Own the merge bar for this team: reviews, conventions, risk tradeoffs. Unblock others; "
-        "keep scope and quality aligned with the sprint goal."
-    ),
-    "solutions_architect": (
-        "Produce decision-ready architecture: options, tradeoffs, boundaries, ADR-style writing. "
-        "Review for system fit, not line-by-line style, unless it signals architectural drift."
+        "Own the merge bar for this team: you alone perform formal pull request review "
+        "(approve | request_changes | comment) for this squad. Set conventions and risk tradeoffs; "
+        "unblock others; keep scope and quality aligned with the sprint goal."
     ),
 }
 
@@ -79,41 +68,25 @@ _ROLE_LISTEN = {
         "You listen to the features and contracts requested and implement server-side code and data "
         "work, opening pull requests when your task is complete."
     ),
-    "scrum_master": (
-        "During standup you listen for yesterday, today, and blockers and keep the team on that rhythm. "
-        "You do not translate CEO asks into backlog, run planning, or orchestrate who does what—only "
-        "lead the standup. Use git for standup or process notes if needed, not product feature code."
-    ),
     "tech_lead": (
-        "You listen to features and risk; you implement when needed, review heavily, and keep work "
-        "aligned with the merge bar, opening pull requests for your own changes."
-    ),
-    "solutions_architect": (
-        "You listen to direction and constraints; you produce architecture decisions and sketches "
-        "in-repo when asked, and you open pull requests when your design artifacts should land like "
-        "other code."
+        "You listen to features and risk; you implement when needed, review every squad PR formally, "
+        "and keep work aligned with the merge bar, opening pull requests for your own changes."
     ),
 }
 
 _REVIEW_PR = {
     "frontend": (
-        "PR review: 1–3 concrete comments tied to lines or files; "
-        "then one of: approve | request_changes | comment."
+        "Pull requests: you do not perform formal PR review on this team. Only the tech lead may "
+        "record approve, request_changes, or merge-bar decisions on pull requests. You may reply in "
+        "threads to answer questions about your changes, but do not act as reviewer-of-record."
     ),
     "backend": (
-        "PR review: 1–3 concrete comments tied to lines or files; "
-        "then one of: approve | request_changes | comment."
-    ),
-    "scrum_master": (
-        "In PR threads: process and clarity only—scope, reviewers, acceptance—not line-level code unless asked. "
-        "If you must record a stance: comment | approve (rare) as appropriate."
+        "Pull requests: you do not perform formal PR review on this team. Only the tech lead may "
+        "record approve, request_changes, or merge-bar decisions on pull requests. You may reply in "
+        "threads to answer questions about your changes, but do not act as reviewer-of-record."
     ),
     "tech_lead": (
         "PR review: 1–3 concrete items; label blocking vs nit; clear merge bar; "
-        "approve | request_changes | comment."
-    ),
-    "solutions_architect": (
-        "PR review: 1–3 concrete items on system fit, boundaries, operability; "
         "approve | request_changes | comment."
     ),
 }
@@ -137,7 +110,7 @@ Pull request workflow (when the user wants a PR or standard team workflow):
 4. Make edits with write_workspace_file under the repo subdirectory, then run_git add, run_git commit.
 5. run_git push -u origin <feature-branch> (after rewrite_origin_for_github_token_push when using HTTPS with GITHUB_TOKEN).
 6. Call create_github_pull_request with repo_subdir, head_branch = feature branch, base_branch from get_github_repository_metadata, title, and optional body. Use draft true only if the user asked for a draft.
-7. After the PR is opened, give the user the PR html_url. Do not merge or approve PRs via API or git merge to main; a human will review and merge on GitHub.
+7. After the PR is opened, give the user the PR html_url. In-sim, only the tech lead agent performs formal PR review (approve or request_changes); do not merge or approve PRs to main via API or git merge unless the user explicitly asks—humans may still merge on GitHub.
 
 Direct push to main without a PR: only when the user explicitly asks to skip the PR workflow.
 
@@ -172,10 +145,9 @@ _ROLE_EXAMPLES: dict[str, str] = {
         "  today: equals-button animation + accessibility pass\n"
         "  blockers: waiting on the /calc/evaluate contract from backend\n"
         "\n"
-        "PR review on a button change:\n"
-        "  nit: this button loses focus outline on Safari — we need the visible ring\n"
-        "  the onClick runs setState twice; batch it\n"
-        "  request_changes"
+        "Handoff note on your open PR (for tech lead, not a formal review):\n"
+        "  Safari loses focus outline on the equals button — I added a note in the PR body.\n"
+        "  happy to pair if you want a walkthrough before you review"
     ),
     "backend": (
         "Standup:\n"
@@ -183,21 +155,9 @@ _ROLE_EXAMPLES: dict[str, str] = {
         "  today: error shape + rate-limit middleware\n"
         "  blockers: none\n"
         "\n"
-        "PR review on a schema change:\n"
-        "  this migration isn't reversible — add a down() before merging\n"
-        "  new column should be NOT NULL with a default, not nullable\n"
-        "  request_changes"
-    ),
-    "scrum_master": (
-        "Standup summary:\n"
-        "  we're on track for the multiplication slice.\n"
-        "  tech lead is blocked on the API contract — backend, can you spec it today?\n"
-        "  frontend's accessibility pass slips to Friday; I'll note it in the buffer\n"
-        "\n"
-        "When two ICs disagree in review:\n"
-        "  I hear tech lead wants tests first and backend wants to ship behind a flag.\n"
-        "  Can we ship behind a flag today and add tests before we remove the flag?\n"
-        "  backend owns the ticket — your call, decide by end of day"
+        "Reply in your PR thread (not a formal review stance):\n"
+        "  migration 0003 adds the nullable column first on purpose — two-phase deploy.\n"
+        "  second PR will tighten to NOT NULL after backfill; tech lead, call out if you want one phase instead"
     ),
     "tech_lead": (
         "PR review on a new feature:\n"
@@ -210,17 +170,6 @@ _ROLE_EXAMPLES: dict[str, str] = {
         "  context: operator precedence is becoming a mess of conditionals.\n"
         "  decision: introduce a shunting-yard parser next sprint.\n"
         "  consequences: +1 file, -40 lines of conditionals, test surface shrinks"
-    ),
-    "solutions_architect": (
-        "ADR:\n"
-        "  context: calculator needs expression history across sessions.\n"
-        "  decision: persist last 50 expressions in localStorage, schema v1.\n"
-        "  consequences: no backend change; upgrade path via versioned schema key.\n"
-        "\n"
-        "Standup:\n"
-        "  yesterday: reviewed the evaluator architecture with tech lead\n"
-        "  today: drafting ADR-003 on the parser swap\n"
-        "  blockers: none — happy to pair on the parser if useful"
     ),
 }
 
@@ -435,7 +384,7 @@ def _persona_block(p: dict) -> str:
 
 
 def generate_prompt(persona: dict) -> str:
-    """Structured system prompt — identity, persona, rules, format, examples; git block only for IC/TL."""
+    """Structured system prompt — identity, persona, rules, format, examples, git workflow."""
     p = persona
     role_key = p["role"]
     title = _ROLE_TITLE[role_key]
@@ -469,9 +418,8 @@ def generate_prompt(persona: dict) -> str:
             "</output_format>"
         ),
         f"<examples>\n{examples}\n</examples>",
+        f"<git_workflow>\n{_GIT_AND_PR_WORKFLOW}\n</git_workflow>",
     ]
-    if role_key not in _ROLES_SKIP_GIT_WORKFLOW:
-        sections.append(f"<git_workflow>\n{_GIT_AND_PR_WORKFLOW}\n</git_workflow>")
     return "\n\n".join(sections)
 
 

@@ -90,15 +90,6 @@
       "rust",
       "openapi"
     ],
-    "scrum_master": [
-      "linear",
-      "jira",
-      "miro",
-      "slack",
-      "notion",
-      "figjam",
-      "calendar"
-    ],
     "tech_lead": [
       "typescript",
       "github.actions",
@@ -106,16 +97,21 @@
       "kubernetes",
       "aws",
       "pytest",
-      "gradle"
-    ],
-    "solutions_architect": [
+      "gradle",
       "openapi",
       "graphql",
       "terraform",
       "kafka",
       "postgresql",
       "event-driven",
-      "adr"
+      "adr",
+      "linear",
+      "jira",
+      "miro",
+      "slack",
+      "notion",
+      "figjam",
+      "calendar"
     ]
   },
   "disliked_stack_by_role": {
@@ -131,20 +127,16 @@
       "no-migrations",
       "silent-failures"
     ],
-    "scrum_master": [
-      "status-only.meetings",
-      "hero-culture",
-      "six-hour.architecture-theatre"
-    ],
     "tech_lead": [
       "clever-metaprogramming",
       "long-lived.branches",
-      "mystery.env"
-    ],
-    "solutions_architect": [
+      "mystery.env",
       "distributed-monolith",
       "one-size.microservices",
-      "vendor.lock-in"
+      "vendor.lock-in",
+      "status-only.meetings",
+      "hero-culture",
+      "six-hour.architecture-theatre"
     ]
   },
   "generation_defaults": {

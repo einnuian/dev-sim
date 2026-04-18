@@ -6,18 +6,19 @@ This document explains how agent personas relate to intended behavior: voice, ri
 
 | Piece | Purpose |
 | --- | --- |
-| `schemas/agent.schema.json` | Canonical JSON Schema for a persona document. |
-| `personas/trait_pools.json` | Unique tags and text pools (traits, strengths, weaknesses, quirks, stacks by role, etc.). |
+| `schemas/agent.schema.v2.json` | Canonical JSON Schema v2 (token stacks, `git_identity`, controlled vocabulary). |
+| `schemas/agent.schema.json` | Thin `$ref` to v2 for stable path. |
+| `personas/trait_pools.json` | Pools aligned with v2 enums and per-role stack tokens. |
 | `personas/generate_persona.py` | CLI to emit random valid-shaped persona objects (JSON). |
 | `personas/manifest.json` | Pointers to pools, generator, and schema. |
 
-## Role voice (`voice_notes` + `role`)
+## Role voice (`role`)
 
-Optional `voice_notes` plus the `role` field are meant to keep registers distinct (e.g. Scrum Master vs Solutions Architect vs Tech Lead) when a runtime generates dialogue or prompts.
+v2 drops per-persona `voice_notes`; role-level prompt templates carry register guardrails. The `role` field selects those baselines plus few-shot examples in generated prompts.
 
 ## Personality traits → behavior
 
-Traits are tags (`personality_traits`, plus `work_style` and `communication_style`). They are labels for humans and for downstream logic. The pool separates character tags from `work_styles` and `communication_styles` so sampling does not duplicate the same idea in two fields.
+Traits are controlled vocabulary in v2 (`personality_traits`, `work_style`, `communication_style`, `strengths`, `weaknesses`) — see `trait_pools.json` and `agent.schema.v2.json`.
 
 ### Example mappings
 
@@ -29,8 +30,8 @@ Traits are tags (`personality_traits`, plus `work_style` and `communication_styl
 | `mentor` | More explanations in threads; boosts teaching outcomes in scoring. |
 | `chaotic_good` | Breaks process gently for outcomes; unpredictable meeting airtime. |
 | `rockstar` | Strong opinions; may dominate turns unless `meeting_airtime` is low. |
-| `tdd_first` | Asks for tests first in PR review threads. |
-| `meeting_heavy` | Scrum-type roles: more structured participation in stand-ups and retros. |
+| `tdd_first` | Asks for tests first in design discussion or before handoff to tech lead. |
+| `meeting_heavy` | Roles that run many rituals: more structured participation in stand-ups and retros. |
 | `heads_down` | Fewer long messages; prefers async, shorter ritual turns. |
 
 Exact numbers belong in `performance_hints` (optional on each persona) so a scoring layer can use one coherent formula without hard-coding trait names everywhere.
@@ -52,6 +53,6 @@ Default stdout is an LLM system-style prompt. Use `--format json` for structured
 
 ## Files to read next
 
-- `schemas/agent.schema.json`
+- `schemas/agent.schema.v2.json`
 - `personas/trait_pools.json`
 - `personas/manifest.json`
