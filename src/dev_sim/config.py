@@ -21,6 +21,13 @@ K_ANTHROPIC_REVIEW_MODEL = "ANTHROPIC_REVIEW_MODEL"  # reserved for a review / s
 
 DEFAULT_CODING_MODEL = "claude-sonnet-4-6"
 DEFAULT_REVIEW_MODEL = "claude-sonnet-4-6"
+# PR review agent (K2 / OpenAI-compatible) — see dev_sim.review_agent
+K2_DEFAULT_REVIEW_MODEL = "MBZUAI-IFM/K2-Think-v2"
+K2_API_BASE = "https://api.k2think.ai/v1"
+K_K2_API_KEY = "K2_API_KEY"
+# Optional: override K2 model id for review (defaults to K2_DEFAULT_REVIEW_MODEL)
+K2_REVIEW_MODEL = "K2_REVIEW_MODEL"
+
 DEFAULT_REPO_REGISTRY = "repo-registry.json"
 
 # Backward-compatible alias (code may use either name)
@@ -43,6 +50,22 @@ def get_anthropic_api_key() -> str | None:
 def get_github_token() -> str | None:
     v = os.environ.get(K_GITHUB_TOKEN)
     return v if v else None
+
+
+def get_k2_api_key() -> str | None:
+    v = os.environ.get(K_K2_API_KEY)
+    return v if v else None
+
+
+def resolve_k2_review_model(override: str | None) -> str:
+    """K2/Think model id for the PR review agent (OpenAI-compatible API at K2_API_BASE)."""
+    if override and override.strip():
+        return override.strip()
+    for key in (K2_REVIEW_MODEL,):
+        v = os.environ.get(key)
+        if v and v.strip():
+            return v.strip()
+    return K2_DEFAULT_REVIEW_MODEL
 
 
 def resolve_coding_model(cli_model: str | None) -> str:

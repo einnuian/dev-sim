@@ -306,6 +306,18 @@ The `dev-sim` package exposes a small CLI (`dev-sim` entry point) that loads env
 - `GITHUB_TOKEN` — required for `create_github_repository`, `get_github_repository_metadata`, `create_github_pull_request`, and for `rewrite_origin_for_github_token_push` when pushing over HTTPS without interactive auth.
 - `ANTHROPIC_MODEL` — optional default for the coding agent; overridden by `dev-sim -m`.
 - `ANTHROPIC_REVIEW_MODEL` — reserved for a second (e.g. review) agent; falls back to `ANTHROPIC_MODEL` then a built-in default.
+- `K2_API_KEY` — required for **`dev-sim-review`**, the pull-request review command (K2 Think over the OpenAI-compatible API).
+- `K2_REVIEW_MODEL` — optional K2 model id for that command; default is `MBZUAI-IFM/K2-Think-v2` (overridden by `dev-sim-review -m`).
+
+**PR review (`dev-sim-review`)**
+
+The `dev-sim-review` entry point fetches the PR’s unified diff and metadata from the GitHub API, calls K2 to produce a structured `CodeReviewResult`-style JSON review, and posts a markdown summary as a **top-level issue comment** on the pull request (same as a normal PR comment). Example:
+
+```bash
+dev-sim-review myorg myrepo 42
+```
+
+Use `--no-post` to print the comment without posting. A fine-grained or classic token needs access to read the pull request and create issue comments (e.g. **Issues: Read and write** on a fine-grained PAT, in addition to **Pull requests** and **Contents** as needed to read the diff).
 
 **Pull request workflow**
 
