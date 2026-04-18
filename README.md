@@ -300,9 +300,12 @@ The `dev-sim` package exposes a small CLI (`dev-sim` entry point) that loads env
 
 **Environment variables**
 
-- `ANTHROPIC_API_KEY` — required to call Claude.
+(See also [`src/dev_sim/config.py`](src/dev_sim/config.py) for key names, defaults, and `resolve_coding_model` / `resolve_review_model`.)
+
+- `ANTHROPIC_API_KEY` — required to call **Claude** (Anthropic API) for the coding agent.
 - `GITHUB_TOKEN` — required for `create_github_repository`, `get_github_repository_metadata`, `create_github_pull_request`, and for `rewrite_origin_for_github_token_push` when pushing over HTTPS without interactive auth.
-- `ANTHROPIC_MODEL` — optional override for the model id.
+- `ANTHROPIC_MODEL` — optional default for the coding agent; overridden by `dev-sim -m`.
+- `ANTHROPIC_REVIEW_MODEL` — reserved for a second (e.g. review) agent; falls back to `ANTHROPIC_MODEL` then a built-in default.
 
 **Pull request workflow**
 
@@ -312,6 +315,10 @@ The agent is instructed to follow a branch-based PR flow: sync the default branc
 
 - **Classic PAT:** include scope that allows creating pull requests on the target repos (typically `repo` for private repositories).
 - **Fine-grained PAT:** grant **Pull requests: Read and write** (and **Contents: Read and write** if the agent must push commits) on the repository.
+
+**Repo name registry**
+
+Short names can be mapped to clone URLs in a JSON file so the agent can resolve projects by name. Copy [`repo-registry.example.json`](repo-registry.example.json) to `repo-registry.json` (same directory you run `dev-sim` from, unless you pass `--repo-registry PATH`). The file uses `{"repos": {"short-name": "https://github.com/org/repo.git"}}`. After **`create_github_repository`** succeeds, the CLI **always** writes that repo’s name and HTTPS clone URL into the registry. The agent can still use `read_repo_registry`, `upsert_repo_registry_entry`, and `remove_repo_registry_entry` for lookups, aliases, and edits. `repo-registry.json` is gitignored by default so local mappings are not committed.
 
 ---
 
