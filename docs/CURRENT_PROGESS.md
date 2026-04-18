@@ -1,8 +1,14 @@
 # CURRENT_PROGESS
 
+Note: filename uses PROGESS (typo). Some people search for CURRENT_PROGRESS; this is the same file.
+
 ## Purpose
 
 This document is a handoff summary for another LLM/AI agent. It captures what was requested, what was implemented, where the project pivoted, and what is currently blocked.
+
+Expanded narrative on tensions and lessons lives in:
+
+- `docs/handoff/struggles-and-realizations.md`
 
 ---
 
@@ -35,10 +41,13 @@ This document is a handoff summary for another LLM/AI agent. It captures what wa
 
 - Created prompt library:
   - `prompts/README.md`
-  - `prompts/roles/*.md` (role-level templates)
-  - `prompts/personas/*.md` (persona-level templates)
-  - `prompts/commits.md` (commit message style guidance, incl. `sass` mode)
-- Added commit-channel prompt guidance so agent commit subjects can vary by persona tone.
+  - `prompts/roles/standard.md` (shared GitHub + repo registry + numbered PR workflow; Cursor-style baseline)
+  - `prompts/roles/*.md` (per-role templates aligned with that baseline)
+  - `prompts/personas/*.md` (persona-level voice and turn behavior)
+  - `prompts/commits.md` (commit / PR title guidance, standard vs sass)
+- Evolved through several interpretations of "standard" (sprint one-liner vs Git tooling doc); settled on tooling-shaped role prompts with a DevTeam carve-out: team repo already exists, no `create_github_repository` for that product repo unless user explicitly wants a new unrelated repo (see role files).
+- Removed `CHANNEL=...` sections from role prompts and dropped `{{CHANNEL}}` from persona/README placeholder lists; orchestrator must use another way to select standup vs implement vs review if needed.
+- Reformatted roles, personas, `prompts/README.md`, and `prompts/commits.md` into plain text (no `#` headers, no `**` emphasis, no tables) per latest style request—easier to inject wholesale into prompts.
 
 ## 3) Multi-agent git commit demo
 
@@ -104,6 +113,18 @@ Current capabilities:
 
 README updated:
 - `examples/gemini-feature-split-demo/README.md`
+
+---
+
+## Struggles and realizations (short)
+
+- Ambiguity of "standard" (workflow tagline vs Git/PR instruction block) caused prompt rework; see `docs/handoff/struggles-and-realizations.md`.
+- Balancing full coding-assistant capabilities (create repo, registry) with sim lore (TM2 provisions repo) required explicit bullets in each role file, not one vague sentence.
+- Provider and WAF failures were easy to misdiagnose as "bad key only"; raw error bodies and Cloudflare codes matter.
+- CHANNEL removal improves prompt simplicity but breaks any tool that still branches on `{{CHANNEL}}`—verify integration before shipping.
+- Duplicating the seven PR steps in every role file is verbose; it avoids silent failure when only one file is loaded.
+
+Full discussion: `docs/handoff/struggles-and-realizations.md`.
 
 ---
 
