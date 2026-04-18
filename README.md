@@ -294,4 +294,25 @@ Please answer these before Sprint 1 planning so we can lock scope.
 
 ---
 
+## Appendix: dev-sim CLI (GitHub + Claude)
+
+The `dev-sim` package exposes a small CLI (`dev-sim` entry point) that loads environment variables from a `.env` file (via `python-dotenv`) and runs a Claude agent with tools for local git and the GitHub API.
+
+**Environment variables**
+
+- `ANTHROPIC_API_KEY` — required to call Claude.
+- `GITHUB_TOKEN` — required for `create_github_repository`, `get_github_repository_metadata`, `create_github_pull_request`, and for `rewrite_origin_for_github_token_push` when pushing over HTTPS without interactive auth.
+- `ANTHROPIC_MODEL` — optional override for the model id.
+
+**Pull request workflow**
+
+The agent is instructed to follow a branch-based PR flow: sync the default branch, create a feature branch, commit changes, push the branch, then call `create_github_pull_request`. Merging or approving on GitHub is left to humans; the agent does not merge via the API.
+
+**Token scopes for PRs**
+
+- **Classic PAT:** include scope that allows creating pull requests on the target repos (typically `repo` for private repositories).
+- **Fine-grained PAT:** grant **Pull requests: Read and write** (and **Contents: Read and write** if the agent must push commits) on the repository.
+
+---
+
 *End of document.*  
