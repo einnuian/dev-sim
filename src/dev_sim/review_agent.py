@@ -200,30 +200,56 @@ def format_review_markdown(review: dict[str, Any], include_json: bool) -> str:
     return "".join(parts)
 
 
-def run_k2_pr_review(
+def compute_k2_pr_review(
     token: str,
     owner: str,
     repo: str,
     pull_number: int,
     *,
     model: str,
-    post_comment: bool = True,
     max_diff_chars: int = 200_000,
-    include_json: bool = True,
-) -> None:
-    token = token.strip() if token else ""
+    include_json_in_comment: bool = True,
+) -> dict[str, Any]:
+    """
+    Fetch PR diff, call K2, parse ``CodeReviewResult`` JSON. Does **not** post to GitHub.
+
+    Returns keys: ``ok`` (bool), ``error`` (str | None), ``review`` (dict | None),
+    ``raw_model`` (str), ``comment_markdown`` (str), ``parse_ok`` (bool), ``meta`` (dict | None).
+    """
+    token = (token or "").strip()
     if not token:
-        print("GITHUB_TOKEN is required.", file=sys.stderr)
-        sys.exit(1)
+        return {
+            "ok": False,
+            "error": "GITHUB_TOKEN is required.",
+            "review": None,
+            "raw_model": "",
+            "comment_markdown": "",
+            "parse_ok": False,
+            "meta": None,
+        }
     k2_key = get_k2_api_key()
     if not k2_key:
-        print("K2_API_KEY is required for the PR review agent (K2 Think / OpenAI-compatible).", file=sys.stderr)
-        sys.exit(1)
+        return {
+            "ok": False,
+            "error": "K2_API_KEY is required for the PR review agent.",
+            "review": None,
+            "raw_model": "",
+            "comment_markdown": "",
+            "parse_ok": False,
+            "meta": None,
+        }
 
     meta = fetch_pr_metadata(token, owner, repo, pull_number)
     if not meta:
-        print("Failed to fetch pull request. Check org/repo, PR number, and token access.", file=sys.stderr)
-        sys.exit(1)
+        return {
+            "ok": False,
+            "error": "Failed to fetch pull request (metadata).",
+            "review": None,
+            "raw_model": "",
+            "comment_markdown": "",
+            "parse_ok": False,
+            "meta": None,
+        }
 
     title = meta.get("title", "")
     body = (meta.get("body") or "")[:8000]
@@ -262,23 +288,72 @@ def run_k2_pr_review(
             ],
         )
     except Exception as e:
-        print(f"K2 request failed: {e}", file=sys.stderr)
-        sys.exit(1)
+        return {
+            "ok": False,
+            "error": f"K2 request failed: {e}",
+            "review": None,
+            "raw_model": "",
+            "comment_markdown": "",
+            "parse_ok": False,
+            "meta": meta,
+        }
 
     choice = resp.choices[0] if resp.choices else None
     raw = (choice.message.content or "").strip() if choice and choice.message else ""
     if not raw:
-        print("Empty model response", file=sys.stderr)
-        sys.exit(1)
+        return {
+            "ok": False,
+            "error": "Empty model response",
+            "review": None,
+            "raw_model": "",
+            "comment_markdown": "",
+            "parse_ok": False,
+            "meta": meta,
+        }
 
     review_obj = _try_parse_review_json(raw)
     if review_obj:
-        comment_body = format_review_markdown(review_obj, include_json=include_json)
+        comment_body = format_review_markdown(review_obj, include_json=include_json_in_comment)
     else:
         comment_body = f"### Automated code review (K2 / dev-sim)\n\n" + (
             f"The model did not return parseable JSON. Raw response:\n\n```\n{raw[:50_000]}\n```"
         )
 
+    return {
+        "ok": True,
+        "error": None,
+        "review": review_obj,
+        "raw_model": raw,
+        "comment_markdown": comment_body,
+        "parse_ok": review_obj is not None,
+        "meta": meta,
+    }
+
+
+def run_k2_pr_review(
+    token: str,
+    owner: str,
+    repo: str,
+    pull_number: int,
+    *,
+    model: str,
+    post_comment: bool = True,
+    max_diff_chars: int = 200_000,
+    include_json: bool = True,
+) -> None:
+    out = compute_k2_pr_review(
+        token,
+        owner,
+        repo,
+        pull_number,
+        model=model,
+        max_diff_chars=max_diff_chars,
+        include_json_in_comment=include_json,
+    )
+    if not out["ok"]:
+        print(out.get("error") or "Review failed.", file=sys.stderr)
+        sys.exit(1)
+    comment_body = str(out["comment_markdown"])
     if post_comment:
         r = post_pr_issue_comment(
             token, owner, repo, issue_number=pull_number, body=comment_body
@@ -290,10 +365,10 @@ def run_k2_pr_review(
         print("Posted PR comment" + (f": {c_url}" if c_url else ""), file=sys.stderr)
     else:
         print(comment_body)
-        return
 
 
 __all__ = [
+    "compute_k2_pr_review",
     "fetch_pr_diff",
     "fetch_pr_metadata",
     "format_review_markdown",

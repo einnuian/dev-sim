@@ -319,6 +319,10 @@ dev-sim-review myorg myrepo 42
 
 Use `--no-post` to print the comment without posting. A fine-grained or classic token needs access to read the pull request and create issue comments (e.g. **Issues: Read and write** on a fine-grained PAT, in addition to **Pull requests** and **Contents** as needed to read the diff).
 
+**Orchestrated workflow (`dev-sim-orchestrate` / `orchestrate.py`)**
+
+`dev-sim-orchestrate` (or `python orchestrate.py` from the repo root with `src` on the path) runs: **Claude coding agent** → **K2 PR review** on the pull request the agent opened → **second coding pass** with the parsed `CodeReviewResult` JSON embedded in the user message so Claude can apply fixes and push to the same branch. The review is also posted as a PR comment unless you pass `--no-review-comment`. If the review verdict is **approve**, the follow-up coding pass is skipped unless you pass **`--always-followup`**. Requires `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, and `K2_API_KEY`.
+
 **Pull request workflow**
 
 The agent is instructed to follow a branch-based PR flow: sync the default branch, create a feature branch, commit changes, push the branch, then call `create_github_pull_request`. Merging or approving on GitHub is left to humans; the agent does not merge via the API.

@@ -17,6 +17,7 @@ dependencies = [
 [project.scripts]
 dev-sim = "dev_sim.cli:main"
 dev-sim-review = "dev_sim.review_cli:main"
+dev-sim-orchestrate = "dev_sim.orchestrate:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dev_sim"]

@@ -727,7 +727,7 @@ def _execute_tool(
             slug = _origin_github_owner_repo(repo)
             if slug.get("error"):
                 return slug
-            return _github_create_pull_request(
+            pr = _github_create_pull_request(
                 github_token,
                 str(slug["owner"]),
                 str(slug["repo"]),
@@ -737,6 +737,13 @@ def _execute_tool(
                 tool_input.get("body"),
                 bool(tool_input.get("draft", False)),
             )
+            if pr.get("ok"):
+                pr = {
+                    **pr,
+                    "owner": str(slug["owner"]),
+                    "repo": str(slug["repo"]),
+                }
+            return pr
 
         if name == "list_workspace":
             lines: list[str] = []
@@ -780,7 +787,7 @@ def run_coding_agent(
     max_turns: int,
     github_token: str | None,
     repo_registry_path: Path,
-) -> None:
+) -> dict[str, Any]:
     load_env()
     api_key = get_anthropic_api_key()
     if not api_key:
@@ -790,6 +797,7 @@ def run_coding_agent(
     client = anthropic.Anthropic(api_key=api_key)
     tools = _tool_specs()
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
+    last_pr: dict[str, Any] | None = None
 
     for _ in range(max_turns):
         message = client.messages.create(
@@ -809,7 +817,7 @@ def run_coding_agent(
                         t = block.get("text")
                     if t:
                         print(t)
-            return
+            return {"last_pr": last_pr, "stop": "end_turn"}
 
         # e.g. max_tokens, refusal — print any text then stop (no tool_results to send).
         if message.stop_reason != "tool_use":
@@ -822,7 +830,7 @@ def run_coding_agent(
                         print(t)
             if message.stop_reason:
                 print(f"(stop_reason: {message.stop_reason})", file=sys.stderr)
-            return
+            return {"last_pr": last_pr, "stop": str(message.stop_reason)}
 
         # Assistant asked for one or more tools: run them and send results in a single user message.
         tool_results: list[dict[str, Any]] = []
@@ -842,6 +850,19 @@ def run_coding_agent(
             result = _execute_tool(
                 str(tname), tinput, workspace, github_token, repo_registry_path
             )
+            if (
+                tname == "create_github_pull_request"
+                and isinstance(result, dict)
+                and result.get("ok")
+                and result.get("number") is not None
+            ):
+                last_pr = {
+                    "owner": str(result.get("owner", "")),
+                    "repo": str(result.get("repo", "")),
+                    "number": int(result["number"]),
+                    "html_url": str(result.get("html_url") or ""),
+                    "title": str(result.get("title") or ""),
+                }
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -855,3 +876,4 @@ def run_coding_agent(
         messages.append({"role": "user", "content": tool_results})
 
     print(f"Stopped after {max_turns} turns (max_turns limit).", file=sys.stderr)
+    return {"last_pr": last_pr, "stop": "max_turns"}
