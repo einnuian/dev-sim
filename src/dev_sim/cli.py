@@ -88,7 +88,7 @@ def main() -> None:
         "--progress-log",
         type=Path,
         default=None,
-        help="Append progress log here (default: <workspace>/dev-sim-agent-progress.log)",
+        help="Append progress log here (default: <workspace>/dev-sim-agents-progress.log)",
     )
     parser.add_argument(
         "--progress-interval",

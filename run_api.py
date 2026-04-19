@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the FastAPI UI bridge: ``uvicorn dev_sim.api:app --reload --port 8000``.
+"""Run the FastAPI economy API: ``GET /api/company``, ``POST /api/simulate`` (port 8000).
 
 Execute from the **repository root** so imports resolve::
 

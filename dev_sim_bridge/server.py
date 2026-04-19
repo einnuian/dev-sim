@@ -9,7 +9,9 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
+
+from dev_sim.agents_payload import get_session_agents
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC = REPO_ROOT / "src"
@@ -54,6 +56,28 @@ class BridgeHandler(BaseHTTPRequestHandler):
             payload = json.dumps({"ok": True, "service": "dev_sim_bridge"}).encode("utf-8")
             self._send(200, payload)
             return
+        if parsed.path == "/api/agents":
+            qs = parse_qs(parsed.query)
+            raw = (qs.get("seed") or [None])[0]
+            refresh_vals = qs.get("refresh") or []
+            force_refresh = any(str(v).lower() in ("1", "true", "yes") for v in refresh_vals)
+            seed: int | None
+            if raw is None or raw == "":
+                seed = None
+            else:
+                try:
+                    seed = int(raw)
+                except ValueError:
+                    self._send(400, json.dumps({"ok": False, "error": "invalid seed"}).encode("utf-8"))
+                    return
+            try:
+                rs = None if seed is None else seed ^ 0x9E3779B9
+                data = get_session_agents(coding_seed=seed, review_seed=rs, force_refresh=force_refresh)
+            except Exception as e:  # noqa: BLE001
+                self._send(500, json.dumps({"ok": False, "error": f"{type(e).__name__}: {e}"}).encode("utf-8"))
+                return
+            self._send(200, json.dumps({"ok": True, **data}).encode("utf-8"))
+            return
         self._send(404, json.dumps({"ok": False, "error": "not found"}).encode("utf-8"))
 
     def do_POST(self) -> None:
@@ -90,11 +114,16 @@ class BridgeHandler(BaseHTTPRequestHandler):
             os.chdir(REPO_ROOT)
             from dev_sim_bridge.pipeline import run_orchestrate_for_prompt
 
+            coding_p = body.get("coding") if isinstance(body.get("coding"), dict) else None
+            review_p = body.get("review") if isinstance(body.get("review"), dict) else None
+
             try:
                 return run_orchestrate_for_prompt(
                     prompt,
                     repo_root=REPO_ROOT,
                     workspace=workspace,
+                    coding_persona=coding_p,
+                    review_persona=review_p,
                 )
             except Exception as e:  # noqa: BLE001 — surface to UI
                 return {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -116,6 +145,7 @@ def main(host: str = "127.0.0.1", port: int = 8765) -> None:
     print(f"dev_sim_bridge listening on http://{host}:{port}", file=sys.stderr)
     print("  POST /api/orchestrate  JSON {\"prompt\": \"...\"}", file=sys.stderr)
     print("  GET  /api/health", file=sys.stderr)
+    print("  GET  /api/agents  optional ?seed=int", file=sys.stderr)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

@@ -1,5 +1,6 @@
 // Simulation engine — drives the live sprint: agents take tickets, commit, open PRs,
 // argue in stand-ups, and produce events.
+import { postSimulateSprint } from '../api/economyApi.js';
 import { state, notify, pushTick, toast, recomputeBurn, openModal, leadershipLabel } from '../state/store.js';
 import { ROLE_LABELS } from '../data/personas.js';
 import { makeStandup, makePRComment, makeRetro, makeQuip, makeCommitMsg, whyDifferent } from '../data/dialogue.js';
@@ -76,7 +77,10 @@ export function tick(dt) {
     if (eventTimer > 35 + Math.random() * 15) { eventTimer = 0; drawRandomEvent(); }
 
     if (state.sprint.elapsed >= state.sprint.duration) {
-      endSprint();
+      void endSprint().catch((err) => {
+        pushTick('event', 'System', `Sprint settlement error: ${err?.message || err}`);
+        notify();
+      });
     }
   }
 
@@ -234,23 +238,74 @@ export function startSprint() {
   notify();
 }
 
-export function endSprint() {
+/** Map team skills to the API’s ``team_stats_sum`` (1–5 buckets per skill axis). */
+export function teamStatsSumForApi() {
+  const keys = ['frontend', 'backend', 'devops', 'design', 'comms', 'leadership'];
+  let sum = 0;
+  for (const a of state.team) {
+    if (a.fired) continue;
+    const sk = a.skills || {};
+    for (const k of keys) {
+      const v = sk[k];
+      if (typeof v !== 'number') continue;
+      sum += Math.max(1, Math.min(5, Math.round(v / 20)));
+    }
+  }
+  return Math.max(30, sum);
+}
+
+function sprintSpecText() {
+  const titles = (state.sprint.backlog || []).slice(0, 5).map((t) => t.title || t.id).join('; ');
+  return `Sprint ${state.sprint.number} scope: ${titles}`.slice(0, 4000);
+}
+
+async function settleEconomyForSprint() {
+  const body = {
+    project_name: `Sprint ${state.sprint.number}`,
+    project_spec: sprintSpecText(),
+    expected_mrr: Math.max(500, Number(state.economy.mrr) * 4),
+    team_stats_sum: teamStatsSumForApi(),
+  };
+  const data = await postSimulateSprint(body);
+  state.economy.cash = Math.round(Number(data.balance) || 0);
+  state.economy.mrr = Math.round(Number(data.active_mrr) || 0);
+  state.economy.techDebt = Math.min(100, Math.max(0, Number(data.tech_debt) || 0));
+  state.economy.burnRate = Math.round(Number(data.burn_rate) || state.economy.burnRate);
+  state.economy.valuation = Number(data.valuation) || 0;
+  state.economy.hypeMultiplier = Number(data.hype_multiplier) || 1;
+  state.economy.lastSettlementStatus = data.status;
+  state.economy.lastTechnicalScores = data.technical_scores || null;
+  if (data.status === 'OUTAGE_SURVIVED') {
+    toast('Outage: SLA hit on server ledger; tech debt partially reset.', 'bad');
+  }
+  if (data.status === 'SERIES_A') {
+    toast('Series A: valuation crossed $2M on the server ledger.', 'good');
+  }
+}
+
+export async function endSprint() {
   state.sprint.phase = 'review';
-  // pay salaries / collect MRR
-  state.economy.cash -= state.economy.burnRate;
-  state.economy.cash += state.economy.mrr * 4; // ~monthly per sprint feel
-  if (state.economy.cash > 0 && state.economy.mrr * 4 > state.economy.burnRate) state.stats.profitableSprints++;
+  const cashBefore = state.economy.cash;
+  try {
+    await settleEconomyForSprint();
+  } catch (e) {
+    const msg = e?.message || String(e);
+    pushTick('event', 'Treasury', `Economy API offline — local ledger (${msg.slice(0, 100)})`);
+    state.economy.cash -= state.economy.burnRate;
+    state.economy.cash += state.economy.mrr * 4;
+    state.economy.lastSettlementStatus = null;
+    state.economy.lastTechnicalScores = null;
+  }
+  if (state.economy.cash > cashBefore) state.stats.profitableSprints++;
   if (state.stats.sprintBugs === 0) state.stats.zeroBugSprints++;
   state.stats.sprintBugs = 0;
   if (Math.random() < 0.3) state.stats.fridayShips++;
-  // build retro line per agent
   for (const a of state.team) {
     if (a.fired) continue;
     a.speaking = { text: makeRetro(a, { peer: rand(state.team.filter(x => x.id !== a.id))?.displayName || 'team' }), ttl: 6 };
     a.activity = 'speak';
     a.activityTtl = 6;
   }
-  // compute scores -> open HR review modal
   const scores = computeScores();
   state.history.push({
     sprint: state.sprint.number,
@@ -264,6 +319,7 @@ export function endSprint() {
   if (state.economy.cash <= 0) {
     setTimeout(() => openModal('game-over', {}), 200);
   }
+  notify();
 }
 
 export function computeScores() {
@@ -412,7 +468,7 @@ export function actionHire(candidateId, firedId) {
     fired: false, sprintsServed: 0,
     energy: 90, morale: 70, focus: 80, loyalty: 70, reputation: 50, burnout: 0,
     speaking: { text: 'Excited to be here.', ttl: 4 },
-    activity: 'speak', activityTtl: 4, desk: 0, px: 0, py: 0,
+    activity: 'speak', activityTtl: 4, desk: 0, px: 0, py: 0, _officePlaced: false,
   };
   // replace fired slot
   const idx = state.team.findIndex(a => a.id === firedId);

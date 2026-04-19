@@ -14,8 +14,12 @@ import { runDevSimOrchestrate } from './devSimBridge.js';
 let prCounter = 1000;
 let projectCounter = 1;
 
-function pickByRole(role) {
-  return state.team.find(a => !a.fired && a.role === role) || state.team.find(a => !a.fired);
+function pickCodingAgent() {
+  return state.team.find(a => !a.fired && a.agentKind === 'coding');
+}
+
+function pickReviewAgent() {
+  return state.team.find(a => !a.fired && a.agentKind === 'review');
 }
 
 // Sanitize the iframe content: drop scripts that escape origin.
@@ -112,15 +116,19 @@ export async function runProject(prompt) {
   const projId = `PRJ-${projectCounter++}`;
   pushTick('event', 'CEO', `requested project: "${prompt}"`);
 
-  const sm = pickByRole('scrum_master');
-  const coder = pickByRole('frontend') || pickByRole('backend') || pickByRole('tech_lead');
-  const tlead = pickByRole('tech_lead') || pickByRole('backend') || pickByRole('frontend');
-  const arch = pickByRole('solutions_architect') || tlead;
-
-  if (!sm || !coder || !tlead) {
-    toast('Not enough team members to run a project.', 'bad');
+  const coder = pickCodingAgent();
+  const reviewer = pickReviewAgent();
+  if (!coder || !reviewer) {
+    toast('Load the dev-sim team (start the API / bridge so /api/agents succeeds).', 'bad');
     return;
   }
+  if (!state.backendPersonaPayload?.coding || !state.backendPersonaPayload?.review) {
+    toast('Team personas are not loaded. Start ``python run_api.py`` and reload the page.', 'bad');
+    return;
+  }
+  const sm = reviewer;
+  const tlead = reviewer;
+  const arch = reviewer;
 
   const project = {
     id: projId, prompt, phase: 'planning',
@@ -152,7 +160,7 @@ export async function runProject(prompt) {
 
   let api;
   try {
-    api = await runDevSimOrchestrate(prompt);
+    api = await runDevSimOrchestrate(prompt, state.backendPersonaPayload);
   } catch (e) {
     project.phase = 'done';
     project.error = e?.message || String(e);

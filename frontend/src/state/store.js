@@ -1,5 +1,6 @@
 // Central reactive store. Plain JS — subscribe/dispatch.
-import { PERSONAS, CANDIDATE_POOL, SEED_BACKLOG, ROLE_LABELS } from '../data/personas.js';
+import { SEED_BACKLOG } from '../data/personas.js';
+import { agentFromBackendPersona } from '../data/backendPersona.js';
 
 const listeners = new Set();
 
@@ -15,21 +16,22 @@ function instantiateAgent(p) {
     activity: 'idle', activityTtl: 0,
     desk: 0, // assigned by scene
     px: 0, py: 0, // pixel position in office
+    /** Set true after scene.js places the sprite in front of a desk (do not use px/py === 0 alone). */
+    _officePlaced: false,
   };
 }
 
-function pickInitialTeam() {
-  const byRole = {};
-  for (const r of ['frontend','backend','scrum_master','tech_lead','solutions_architect']) {
-    byRole[r] = PERSONAS.filter(p => p.role === r);
-  }
-  return [
-    byRole.frontend[0],
-    byRole.backend[1],
-    byRole.scrum_master[0],
-    byRole.tech_lead[0],
-    byRole.solutions_architect[0],
-  ].map(instantiateAgent);
+/** Replace roster with the two dev-sim agents from ``GET /api/agents`` (coding + review). */
+export function applyBackendTeam(payload) {
+  const a1 = agentFromBackendPersona(payload.coding, 'coding');
+  const a2 = agentFromBackendPersona(payload.review, 'review');
+  state.team = [instantiateAgent(a1), instantiateAgent(a2)];
+  state.backendPersonaPayload = {
+    coding: clone(payload.coding),
+    review: clone(payload.review),
+  };
+  recomputeBurn();
+  notify();
 }
 
 export const state = {
@@ -44,8 +46,10 @@ export const state = {
     assignments: {}, // ticketId -> agentId
     progress: {},   // ticketId -> 0..1
   },
-  team: pickInitialTeam(),
-  candidatePool: clone(CANDIDATE_POOL),
+  team: [],
+  /** Raw ``coding`` / ``review`` persona dicts from ``GET /api/agents`` for orchestrate. */
+  backendPersonaPayload: null,
+  candidatePool: [],
   prs: [], // {id, ticket, agentId, status: open|review|merged|failed, additions, deletions, comments[]}
   ticker: [], // {ts, kind, who, text}
   achievements: [], // unlocked ids
@@ -59,6 +63,11 @@ export const state = {
     techDebt: 5,
     reputation: 50,
     leadershipKarma: 0, // -100..100
+    /** Mirrors FastAPI ``CompanyState`` when the economy API is used. */
+    valuation: 0,
+    hypeMultiplier: 1,
+    lastSettlementStatus: null, // SERIES_A | BANKRUPT | OUTAGE_SURVIVED | CONTINUE
+    lastTechnicalScores: null, // object from last /api/simulate (optional HUD/debug)
   },
   stats: {
     commits: 0, prs: 0, builds: { pass: 0, fail: 0 },

@@ -5,12 +5,17 @@
 
 const API_PREFIX = (import.meta.env.VITE_DEV_SIM_API || '').replace(/\/$/, '');
 
-export async function runDevSimOrchestrate(prompt) {
+export async function runDevSimOrchestrate(prompt, personaPayload = null) {
+  const body = { prompt };
+  if (personaPayload?.coding && personaPayload?.review) {
+    body.coding = personaPayload.coding;
+    body.review = personaPayload.review;
+  }
   const url = `${API_PREFIX}/api/orchestrate`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ prompt }),
+    body: JSON.stringify(body),
   });
   let data = {};
   try {

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import random
 import sys
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
@@ -24,9 +25,10 @@ if _repo_s not in sys.path:
 
 from shared.review_schema import TECHNICAL_SCORE_KEYS
 
+from dev_sim.agents_payload import get_session_agents
 from dev_sim.economy import CompanyState, SettlementStatus
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -96,11 +98,38 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:4174",
+        "http://127.0.0.1:4174",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.get("/api/agents")
+def get_agents(
+    seed: int | None = Query(None, description="RNG seed used only on the first sample for this process."),
+    refresh: bool = Query(False, description="If true, discard cached personas and sample again."),
+) -> dict[str, Any]:
+    """Personas for the two dev-sim agents; sampled once per process then reused (unless ``refresh``)."""
+    rs = None if seed is None else seed ^ 0x9E3779B9
+    return get_session_agents(coding_seed=seed, review_seed=rs, force_refresh=refresh)
+
+
+@app.get("/api/company")
+def get_company() -> dict[str, Any]:
+    """Return :class:`CompanyState` plus ``persisted`` when loaded from disk."""
+    path = company_state_path()
+    persisted = path.is_file()
+    company = _load_company_or_fresh(path)
+    out: dict[str, Any] = asdict(company)
+    out["persisted"] = persisted
+    return out
 
 
 @app.post("/api/simulate", response_model=SprintResponse)

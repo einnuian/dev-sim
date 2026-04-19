@@ -12,6 +12,8 @@ frontend/
 │   └── assets/
 │       └── game_config.json   # Runtime config placeholder
 ├── src/
+│   ├── api/
+│   │   └── economyApi.js      # GET /api/company, POST /api/simulate → FastAPI
 │   ├── main.js                # Canvas, resizer, render loop, sim tick, HUD init
 │   ├── styles.css             # Full layout + HUD + modals
 │   ├── core/

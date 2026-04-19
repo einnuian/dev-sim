@@ -333,7 +333,7 @@ def compute_k2_pr_review(
             "meta": None,
         }
 
-    log_path = progress_log_path or (Path.cwd() / "dev-sim-review-progress.log")
+    log_path = progress_log_path or (Path.cwd() / ".dev-sim-workspace" / "dev-sim-agents-progress.log")
     if agent_progress:
         plog = AgentProgressLogger(log_path, agent_label="k2_review")
         plog.log_persona_start(persona_dict)

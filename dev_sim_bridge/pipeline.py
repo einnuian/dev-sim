@@ -16,7 +16,12 @@ from dev_sim.config import (
     resolve_k2_review_model,
 )
 from dev_sim.orchestrate import _followup_prompt
-from dev_sim.personas_bridge import coding_persona_bundle, review_persona_bundle
+from dev_sim.personas_bridge import (
+    coding_persona_bundle,
+    persona_slice_coding,
+    persona_slice_review,
+    review_persona_bundle,
+)
 from dev_sim.review_agent import compute_k2_pr_review, post_pr_issue_comment
 
 
@@ -33,6 +38,8 @@ def run_orchestrate_for_prompt(
     no_review_comment: bool = False,
     no_agent_progress: bool = True,
     progress_interval_sec: float = 10.0,
+    coding_persona: dict[str, Any] | None = None,
+    review_persona: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Returns a JSON-serializable dict. Never calls ``sys.exit`` (unlike the CLI).
@@ -56,8 +63,20 @@ def run_orchestrate_for_prompt(
     k2_model = resolve_k2_review_model(None)
     reg = (repo_registry or (repo_root / DEFAULT_REPO_REGISTRY)).expanduser().resolve()
 
-    coding_suffix, coding_persona_dict = coding_persona_bundle(None, None)
-    review_prefix, review_persona_dict = review_persona_bundle(None)
+    if coding_persona is not None and review_persona is not None:
+        try:
+            coding_suffix = persona_slice_coding(coding_persona)
+            coding_persona_dict = coding_persona
+            review_prefix = persona_slice_review(review_persona)
+            review_persona_dict = review_persona
+        except (KeyError, TypeError, ValueError) as e:
+            return {
+                "ok": False,
+                "error": f"Invalid coding/review persona payload (must match generate_persona v2 roles): {e}",
+            }
+    else:
+        coding_suffix, coding_persona_dict = coding_persona_bundle(None, None)
+        review_prefix, review_persona_dict = review_persona_bundle(None)
     prog = not no_agent_progress
 
     r1 = run_coding_agent(
@@ -70,7 +89,7 @@ def run_orchestrate_for_prompt(
         persona_system_suffix=coding_suffix,
         persona_dict=coding_persona_dict,
         agent_progress=prog,
-        progress_log_path=ws / "dev-sim-agent-progress.log",
+        progress_log_path=ws / "dev-sim-agents-progress.log",
         progress_interval_sec=progress_interval_sec,
     )
     last_pr = r1.get("last_pr")
@@ -99,7 +118,7 @@ def run_orchestrate_for_prompt(
         persona_system_prefix=review_prefix,
         persona_dict=review_persona_dict,
         agent_progress=prog,
-        progress_log_path=ws / "dev-sim-review-progress.log",
+        progress_log_path=ws / "dev-sim-agents-progress.log",
         progress_interval_sec=progress_interval_sec,
     )
     if not review_out.get("ok"):
@@ -143,7 +162,7 @@ def run_orchestrate_for_prompt(
             persona_system_suffix=coding_suffix,
             persona_dict=coding_persona_dict,
             agent_progress=prog,
-            progress_log_path=ws / "dev-sim-agent-progress.log",
+            progress_log_path=ws / "dev-sim-agents-progress.log",
             progress_interval_sec=progress_interval_sec,
         )
         r2_summary = _serialize_run(r2)

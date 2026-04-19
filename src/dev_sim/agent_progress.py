@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import json
-import logging
 import threading
 import time
 from pathlib import Path
 from typing import Any
+
+from dev_sim.agent_run_logging import ensure_progress_logfile, progress_child_logger
 
 # Rotating lines per communication_style (DevTeam Simulator trait vocabulary).
 _ANNOUNCEMENT_BANKS: dict[str, list[str]] = {
@@ -97,9 +98,11 @@ def format_progress_announcement(
 
 class AgentProgressLogger:
     """
-    Logs persona snapshots and periodic announcements to a file (and stderr at INFO).
+    Logs session markers and periodic announcements on ``dev_sim.agents.progress``.
 
-    Create one instance per agent session; thread-safe for ``announce`` / ``log_persona_start``.
+    Full persona JSON for the UI roster is logged separately by ``GET /api/agents``
+    (``dev_sim.agents.personas``). Here we only emit a one-line session marker plus
+    ``ProgressAnnouncer`` lines to the shared progress log file.
     """
 
     def __init__(
@@ -112,35 +115,23 @@ class AgentProgressLogger:
         self.log_path = log_path
         self.agent_label = agent_label
         self._lock = threading.Lock()
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        self._logger = logging.getLogger(f"dev_sim.agent.{id(self)}")
-        self._logger.setLevel(logging.INFO)
-        self._logger.handlers.clear()
-        fh = logging.FileHandler(log_path, encoding="utf-8")
-        fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
-        self._logger.addHandler(fh)
-        if mirror_stderr:
-            sh = logging.StreamHandler()
-            sh.setFormatter(logging.Formatter("%(asctime)s [progress] %(message)s", datefmt="%H:%M:%S"))
-            sh.setLevel(logging.INFO)
-            self._logger.addHandler(sh)
+        ensure_progress_logfile(log_path, mirror_stderr=mirror_stderr)
+        self._logger = progress_child_logger()
 
     def log_persona_start(self, persona: dict[str, Any] | None) -> None:
-        """Log full persona JSON at session start (or note that none was configured)."""
+        """Log a compact session marker (full persona JSON is on ``dev_sim.agents.personas`` from GET)."""
         with self._lock:
             if persona:
-                body = json.dumps(persona, indent=2, ensure_ascii=False)
                 self._logger.info(
-                    "Agent session start label=%s persona=%s display_name=%s role=%s\n%s",
+                    "session_start label=%s id=%s display_name=%s role=%s",
                     self.agent_label,
                     persona.get("id", ""),
                     persona.get("display_name", ""),
                     persona.get("role", ""),
-                    body,
                 )
             else:
                 self._logger.info(
-                    "Agent session start label=%s (no persona dict; announcements use default tone)",
+                    "session_start label=%s (no persona dict; announcements use default tone)",
                     self.agent_label,
                 )
 
