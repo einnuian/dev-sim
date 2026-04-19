@@ -1,6 +1,6 @@
 """Planning agent: one-shot decomposition of a project idea into ordered sprints.
 
-Uses the same K2 (OpenAI-compatible) API as :mod:`dev_sim.review_agent`.
+Uses the Anthropic Messages API (same stack as the coding agent).
 Call ``run_planning_agent(idea)`` to get a list of sprint dicts ready for
 ``run_coding_agent(sprint["prompt"], ...)``.
 """
@@ -14,14 +14,9 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from openai import OpenAI
+import anthropic
 
-from dev_sim.config import (
-    get_k2_api_key,
-    load_env,
-    resolve_k2_api_base,
-    resolve_k2_review_model,
-)
+from dev_sim.config import get_anthropic_api_key, load_env, resolve_coding_model
 
 _DEFAULT_PROMPT_PATH = Path(__file__).resolve().parent.parent.parent / "llm" / "planning_prompt.md"
 
@@ -41,10 +36,22 @@ def _build_user_message(idea: str) -> str:
 
 ---
 
-Reply with **only** a JSON array of sprint objects (raw JSON, no markdown fences, no other text). If product goal, must-have scope, non-goals, or tech stack were not stated, infer them and fold those assumptions into each sprint `prompt`.
+Respond with **two sections in this exact order**:
 
-Schema:
-[{{"number": 1, "title": "string", "prompt": "self-contained implementation brief for the coding agent"}}]
+**Section 1 — JSON sprint list (output this first):**
+
+```json
+[
+  {{
+    "number": 1,
+    "title": "Short sprint title",
+    "prompt": "Full prompt for the coding agent — self-contained with all project context (stack, auth, endpoints, data models, acceptance criteria) so it can implement without reading other sprints."
+  }}
+]
+```
+
+**Section 2 — Human-readable plan:**
+After the JSON block, write the full human-readable plan as described in your instructions.
 """
 
 
@@ -283,7 +290,7 @@ def _normalize_sprint_entries(rows: list[Any], idea: str) -> list[dict[str, Any]
 
 
 def _prose_fallback_sprint_list(idea: str, raw: str) -> list[dict[str, Any]]:
-    """K2 may return a design/TS/markdown plan with no JSON sprint array. Feed it as a single PR-sized prompt."""
+    """The planner may return a design/TS/markdown plan with no JSON sprint array. Feed it as a single PR-sized prompt."""
     text = (raw or "").strip()[:200_000]
     if not text and idea:
         text = (idea or "").strip()
@@ -328,65 +335,77 @@ def _parse_and_normalize_sprints(text: str, idea: str) -> list[dict[str, Any]]:
     return norm
 
 
+def planning_decompose(
+    idea: str,
+    *,
+    model: str | None = None,
+    planning_prompt_path: Path | None = None,
+) -> tuple[list[dict[str, Any]], str]:
+    """Return ``(sprints, raw_model_text)`` for UI + sprint board sync.
+
+    Uses the Anthropic Messages API (``ANTHROPIC_API_KEY``). *model* follows
+    :func:`resolve_coding_model` (same family as the coding agent).
+    """
+    api_key = get_anthropic_api_key()
+    if not api_key:
+        raise RuntimeError("ANTHROPIC_API_KEY is required for planning.")
+
+    resolved_model = resolve_coding_model(model)
+    system_prompt = _load_system_prompt(planning_prompt_path)
+
+    client = anthropic.Anthropic(api_key=api_key)
+    try:
+        resp = client.messages.create(
+            model=resolved_model,
+            max_tokens=8192,
+            system=system_prompt,
+            messages=[{"role": "user", "content": _build_user_message(idea)}],
+        )
+    except Exception as e:  # noqa: BLE001
+        raise RuntimeError(f"Planning request failed: {e}") from e
+
+    parts: list[str] = []
+    for block in resp.content:
+        t = getattr(block, "text", None)
+        if t is None and isinstance(block, dict):
+            t = block.get("text")
+        if t:
+            parts.append(str(t))
+    text = "".join(parts).strip()
+    if not text:
+        raise RuntimeError("Planning returned an empty response.")
+
+    print(text, file=sys.stderr)
+    return _parse_and_normalize_sprints(text, idea), text
+
+
 def run_planning_agent(
     idea: str,
     *,
-    k2_model: str | None = None,
+    model: str | None = None,
     planning_prompt_path: Path | None = None,
 ) -> list[dict[str, Any]]:
     """Decompose *idea* into an ordered list of sprint dicts.
 
     Each dict has ``number`` (int), ``title`` (str), and ``prompt`` (str).
-    The model is instructed to return **only** a JSON array (inferred inputs allowed).
     The planner makes a single one-shot call — no tool loop.
-
-    Uses the K2 OpenAI-compatible API (``K2_API_KEY`` / ``OPENAI_API_KEY``).
-    Model resolution matches PR review: optional *k2_model* override, then
-    ``K2_REVIEW_MODEL`` env, then :data:`dev_sim.config.K2_DEFAULT_REVIEW_MODEL`.
     """
-    resolved_model = resolve_k2_review_model(k2_model)
-    system_prompt = _load_system_prompt(planning_prompt_path)
-
-    k2_key = get_k2_api_key()
-    if not k2_key:
-        raise RuntimeError(
-            "K2_API_KEY or OPENAI_API_KEY is required for planning (K2 OpenAI-compatible API)."
-        )
-
-    client = OpenAI(api_key=k2_key, base_url=resolve_k2_api_base())
-    try:
-        resp = client.chat.completions.create(
-            model=resolved_model,
-            max_tokens=8192,
-            messages=[
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": _build_user_message(idea)},
-            ],
-        )
-    except Exception as e:  # noqa: BLE001
-        raise RuntimeError(f"K2 planning request failed: {e}") from e
-
-    choice = resp.choices[0] if resp.choices else None
-    text = (choice.message.content or "").strip() if choice and choice.message else ""
-    if not text:
-        raise RuntimeError("K2 planning returned an empty response.")
-
-    return _parse_and_normalize_sprints(text, idea)
+    sprints, _ = planning_decompose(idea, model=model, planning_prompt_path=planning_prompt_path)
+    return sprints
 
 
 def main() -> None:
     load_env()
     parser = argparse.ArgumentParser(
-        description="Decompose a project idea into ordered coding-agent sprints (K2 planning).",
+        description="Decompose a project idea into ordered coding-agent sprints (Claude planning).",
     )
     parser.add_argument("idea", nargs="?", help="Free-form project description")
     parser.add_argument("-f", "--idea-file", type=Path, help="Read idea from file")
     parser.add_argument(
         "-m",
-        "--k2-model",
-        dest="k2_model",
+        "--model",
         default=None,
-        help="K2 model id (overrides K2_REVIEW_MODEL env; default from config)",
+        help="Claude model id for planning (default: ANTHROPIC_MODEL env, then built-in)",
     )
     parser.add_argument(
         "--planning-prompt",
@@ -402,8 +421,8 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    if not get_k2_api_key():
-        print("K2_API_KEY or OPENAI_API_KEY is required for planning.", file=sys.stderr)
+    if not get_anthropic_api_key():
+        print("ANTHROPIC_API_KEY is required for planning.", file=sys.stderr)
         sys.exit(1)
 
     if args.idea_file:
@@ -415,9 +434,9 @@ def main() -> None:
         sys.exit(2)
 
     try:
-        sprints = run_planning_agent(
+        sprints, _ = planning_decompose(
             idea,
-            k2_model=args.k2_model,
+            model=args.model,
             planning_prompt_path=args.planning_prompt,
         )
     except Exception as e:  # noqa: BLE001

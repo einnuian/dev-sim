@@ -25,6 +25,32 @@ export async function fetchCompanyState() {
   return parseJsonOrThrow(res);
 }
 
+/**
+ * Overwrite ``.dev-sim/company-state.json`` with Day 1 defaults (matches UI restart).
+ * @param {{ retries?: number, retryDelayMs?: number }} [opts]
+ */
+export async function postResetCompanyState(opts = {}) {
+  const retries = Math.max(1, Math.floor(Number(opts.retries) || 3));
+  const retryDelayMs = Math.max(0, Math.floor(Number(opts.retryDelayMs) || 220));
+  let lastErr = new Error('Company reset failed');
+  for (let i = 0; i < retries; i++) {
+    try {
+      const res = await fetch(`${PREFIX}/api/company/reset`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      return await parseJsonOrThrow(res);
+    } catch (e) {
+      lastErr = e instanceof Error ? e : new Error(String(e));
+      if (i < retries - 1) {
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+      }
+    }
+  }
+  throw lastErr;
+}
+
 /** One sprint settlement + mock K2-style technical scores (server-side). */
 export async function postSimulateSprint(payload) {
   const res = await fetch(`${PREFIX}/api/simulate`, {

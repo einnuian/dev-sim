@@ -7,7 +7,7 @@ import { fetchCompanyState } from './api/economyApi.js';
 import { fetchDevTeamAgents } from './api/agentsApi.js';
 import { initHud } from './hud/render.js';
 import { tick } from './sim/engine.js';
-import { state, openModal, notify, applyBackendTeam } from './state/store.js';
+import { state, openModal, notify, applyBackendTeam, economyHydrateEpoch } from './state/store.js';
 
 const { canvas, ctx } = createCanvasContext('#stage');
 const { viewport } = createResizer(canvas);
@@ -15,8 +15,10 @@ const { viewport } = createResizer(canvas);
 initHud();
 
 async function hydrateEconomyFromServer() {
+  const epochAtStart = economyHydrateEpoch();
   try {
     const d = await fetchCompanyState();
+    if (epochAtStart !== economyHydrateEpoch()) return;
     if (!d.persisted) return;
     state.economy.cash = Math.round(Number(d.balance) || 0);
     state.economy.mrr = Math.round(Number(d.active_mrr) || 0);

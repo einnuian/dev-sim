@@ -12,8 +12,8 @@ from dev_sim.coding_agent import run_coding_agent, workspace_root
 from dev_sim.config import (
     DEFAULT_CODING_PERSONA_ROLE,
     DEFAULT_REPO_REGISTRY,
+    get_anthropic_api_key,
     get_github_token,
-    get_k2_api_key,
     load_env,
     resolve_coding_model,
     resolve_k2_review_model,
@@ -192,8 +192,8 @@ def main() -> None:
         print("GITHUB_TOKEN is required.", file=sys.stderr)
         sys.exit(1)
 
-    if not args.sprints_file and not get_k2_api_key():
-        print("K2_API_KEY or OPENAI_API_KEY is required for planning (use --sprints-file to skip).", file=sys.stderr)
+    if not args.sprints_file and not get_anthropic_api_key():
+        print("ANTHROPIC_API_KEY is required for planning (use --sprints-file to skip).", file=sys.stderr)
         sys.exit(1)
 
     # --- Resolve sprints ---
@@ -209,10 +209,10 @@ def main() -> None:
             print("Provide an idea as an argument, --idea-file, or --sprints-file.", file=sys.stderr)
             sys.exit(2)
 
-        print("--- Planning (K2) ---", file=sys.stderr)
+        print("--- Planning (Claude) ---", file=sys.stderr)
         sprints = run_planning_agent(
             idea,
-            k2_model=args.planning_model,
+            model=args.planning_model,
             planning_prompt_path=args.planning_prompt,
         )
         print(f"\nPlanned {len(sprints)} sprint(s).", file=sys.stderr)

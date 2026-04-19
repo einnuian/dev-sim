@@ -122,6 +122,14 @@ bubbleStyle.textContent = `
 `;
 document.head.appendChild(bubbleStyle);
 
+/** Remove all speech-bubble DOM nodes (e.g. after game restart). */
+export function clearSpeechBubbles() {
+  for (const el of bubbleEls.values()) {
+    el.remove();
+  }
+  bubbleEls.clear();
+}
+
 function syncBubbles() {
   const seen = new Set();
   for (const a of state.team) {
@@ -182,8 +190,8 @@ export function drawScene(ctx, viewport, dt) {
     ctx.fillRect(wx + tile * 1.5 - 1, oy + tile, 2, tile * 2);
   }
 
-  // desks
-  const desks = [0, 1].map((i) => deskFor(i));
+  // desks — one per roster seat (coding, coding_b, review)
+  const desks = [0, 1, 2].map((i) => deskFor(i));
   for (const d of desks) {
     drawDesk(ctx, ox + d.x * tile, oy + d.y * tile, tile);
   }

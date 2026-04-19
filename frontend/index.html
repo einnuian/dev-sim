@@ -99,6 +99,7 @@
       </div>
       <div class="sprint-ledger-strip" id="sprint-ledger-strip" aria-live="polite"></div>
       <div class="controls">
+        <button id="btn-restart-game" type="button" class="btn btn-ghost btn-restart" title="Reset client state to Day 1 (see confirm dialog)">Restart</button>
         <button id="btn-pause" type="button" class="btn btn-ghost" title="Keyboard: Space">|| Pause</button>
         <button id="btn-speed" type="button" class="btn btn-ghost" title="Keyboard: 1 = 1x, 2 = 2x, 4 = 4x">&gt;&gt; 1x</button>
         <button id="btn-end-sprint" class="btn btn-primary">End Sprint &gt;</button>
@@ -127,12 +128,11 @@
         <div class="panel-title">PULL REQUESTS</div>
         <div id="prfeed"></div>
       </div>
-      <div class="panel">
+      <div class="panel grow events-shipped-panel">
         <div class="panel-title">EVENTS DECK</div>
         <div id="eventsdeck"></div>
-      </div>
-      <div class="panel grow">
-        <div class="panel-title">GENERATED PROJECTS</div>
+        <div class="panel-title panel-title-stack">GENERATED PROJECTS</div>
+        <p class="panel-hint">Shipped builds — <strong>Run game</strong> opens the playable preview in a new tab.</p>
         <div id="projects"></div>
       </div>
     </aside>
@@ -153,6 +153,16 @@
         </label>
         <label class="ceo-rev-label"><span>Expected monthly ($)</span>
           <input id="chat-expected-monthly" type="number" min="0" step="50" placeholder="0" inputmode="decimal" />
+        </label>
+      </div>
+      <div class="orch-options-row" role="group" aria-label="Faster orchestration (less accurate)">
+        <label class="orch-opt" title="Skip the planning model; one coding pass on your full prompt.">
+          <input type="checkbox" id="orch-skip-planning" />
+          <span>Skip planning</span>
+        </label>
+        <label class="orch-opt" title="Skip K2 PR review and follow-up coding; still opens a real GitHub PR.">
+          <input type="checkbox" id="orch-skip-k2-review" />
+          <span>Skip K2 review</span>
         </label>
       </div>
       <form id="chatform">

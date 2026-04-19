@@ -30,10 +30,37 @@ from dev_sim.personas_bridge import (
     persona_slice_review,
     review_persona_bundle,
 )
-from dev_sim.planner import run_planning_agent
+from dev_sim.planner import planning_decompose
 from dev_sim.push_target_repo import push_workspace_to_target
 from dev_sim.review_agent import compute_k2_pr_review, post_pr_issue_comment
 from dev_sim.tycoon_sprint import apply_shipped_product_economics
+
+
+def _read_workspace_preview(ws: Path, max_bytes: int = 400_000) -> tuple[str, str]:
+    """Return ``(html, relative_path)`` for the first reasonable entry page under *ws*."""
+    if not ws.is_dir():
+        return "", ""
+    candidates: list[Path] = [
+        ws / "index.html",
+        ws / "dist" / "index.html",
+        ws / "public" / "index.html",
+    ]
+    try:
+        for child in sorted(ws.iterdir()):
+            if child.is_dir():
+                candidates.append(child / "index.html")
+    except OSError:
+        pass
+    for p in candidates:
+        if not p.is_file():
+            continue
+        try:
+            raw = p.read_bytes()[:max_bytes]
+            rel = str(p.relative_to(ws))
+            return raw.decode("utf-8", errors="replace"), rel
+        except (OSError, ValueError):
+            continue
+    return "", ""
 
 
 def run_planned_orchestrate_for_prompt(
@@ -53,9 +80,11 @@ def run_planned_orchestrate_for_prompt(
     expected_monthly: float = 0.0,
     coding_persona: dict[str, Any] | None = None,
     review_persona: dict[str, Any] | None = None,
+    skip_planning: bool = False,
+    skip_k2_review: bool = False,
 ) -> dict[str, Any]:
     """
-    Same env checks as ``run_orchestrate_for_prompt``, then K2 ``run_planning_agent``,
+    Same env checks as ``run_orchestrate_for_prompt``, then Claude ``planning_decompose``,
     then one full orchestrate pass per planned sprint (sequential, shared workspace).
 
     On success, top-level ``lastPr`` / ``review`` / ``verdict`` / ``codingPass1`` / etc.
@@ -70,24 +99,52 @@ def run_planned_orchestrate_for_prompt(
         return {"ok": False, "error": "ANTHROPIC_API_KEY is not set (needed for the coding agent)."}
     if not (get_github_token() or "").strip():
         return {"ok": False, "error": "GITHUB_TOKEN is not set (needed for PRs and review)."}
-    if not get_k2_api_key():
-        return {"ok": False, "error": "K2_API_KEY is not set (needed for K2 planning and PR review)."}
+    if not skip_k2_review and not get_k2_api_key():
+        return {"ok": False, "error": "K2_API_KEY is not set (needed for K2 PR review)."}
 
-    try:
-        sprints = run_planning_agent(t, k2_model=None, planning_prompt_path=None)
-    except Exception as e:  # noqa: BLE001 — return to UI
-        return {"ok": False, "error": f"Planning failed: {e}"}
-
-    if not sprints:
-        return {"ok": False, "error": "Planner returned no sprints."}
-
+    planning_output_cap = 50_000
     planned_sprints: list[dict[str, Any]] = []
-    for s in sprints:
-        planned_sprints.append(
-            {
-                "number": s.get("number"),
-                "title": s.get("title"),
-            }
+
+    if skip_planning:
+        title_line = ((t.split("\n", 1)[0] if t else "") or "").strip()[:120] or "CEO build request"
+        sprints = [{"number": 1, "title": title_line, "prompt": t}]
+        planning_raw_text = (
+            "[Fast path] Planning model skipped — one orchestrate pass on your full prompt.\n"
+            + ("[Fast path] K2 PR review skipped after the coding agent opens a PR.\n" if skip_k2_review else "")
+        )
+        excerpt = (t[:400] + "…") if len(t) > 400 else t
+        planned_sprints = [{"number": 1, "title": title_line, "promptExcerpt": excerpt}]
+    else:
+        try:
+            sprints, planning_raw_text = planning_decompose(t, model=None, planning_prompt_path=None)
+        except Exception as e:  # noqa: BLE001 — return to UI
+            return {"ok": False, "error": f"Planning failed: {e}"}
+
+        planning_output = (
+            planning_raw_text
+            if len(planning_raw_text) <= planning_output_cap
+            else planning_raw_text[:planning_output_cap] + "\n…[truncated]"
+        )
+
+        if not sprints:
+            return {"ok": False, "error": "Planner returned no sprints.", "planningOutput": planning_output}
+
+        for s in sprints:
+            prompt = (s.get("prompt") or "").strip()
+            excerpt = (prompt[:400] + "…") if len(prompt) > 400 else prompt
+            planned_sprints.append(
+                {
+                    "number": s.get("number"),
+                    "title": s.get("title"),
+                    "promptExcerpt": excerpt,
+                }
+            )
+
+    if skip_planning:
+        planning_output = (
+            planning_raw_text
+            if len(planning_raw_text) <= planning_output_cap
+            else planning_raw_text[:planning_output_cap] + "\n…[truncated]"
         )
 
     sprint_results: list[dict[str, Any]] = []
@@ -110,6 +167,7 @@ def run_planned_orchestrate_for_prompt(
                 "ok": False,
                 "error": err,
                 "plannedSprints": planned_sprints,
+                "planningOutput": planning_output,
                 "sprintResults": sprint_results,
             }
 
@@ -130,6 +188,7 @@ def run_planned_orchestrate_for_prompt(
             expected_monthly=float(expected_monthly) if is_last else 0.0,
             coding_persona=coding_persona,
             review_persona=review_persona,
+            skip_k2_review=skip_k2_review,
         )
 
         entry: dict[str, Any] = {
@@ -153,6 +212,7 @@ def run_planned_orchestrate_for_prompt(
                 "ok": False,
                 "error": r.get("error") or "Sprint orchestration failed.",
                 "plannedSprints": planned_sprints,
+                "planningOutput": planning_output,
                 "sprintResults": sprint_results,
             }
             if last_payload is not None:
@@ -167,7 +227,9 @@ def run_planned_orchestrate_for_prompt(
     merged: dict[str, Any] = {**last_payload}
     merged["ok"] = True
     merged["plannedSprints"] = planned_sprints
+    merged["planningOutput"] = planning_output
     merged["sprintResults"] = sprint_results
+    merged["fastPath"] = {"skipPlanning": bool(skip_planning), "skipK2Review": bool(skip_k2_review)}
     return merged
 
 
@@ -188,6 +250,7 @@ def run_orchestrate_for_prompt(
     expected_monthly: float = 0.0,
     coding_persona: dict[str, Any] | None = None,
     review_persona: dict[str, Any] | None = None,
+    skip_k2_review: bool = False,
 ) -> dict[str, Any]:
     """
     Returns a JSON-serializable dict. Never calls ``sys.exit`` (unlike the CLI).
@@ -204,7 +267,7 @@ def run_orchestrate_for_prompt(
         return {"ok": False, "error": "ANTHROPIC_API_KEY is not set (needed for the coding agent)."}
     if not (get_github_token() or "").strip():
         return {"ok": False, "error": "GITHUB_TOKEN is not set (needed for PRs and review)."}
-    if not get_k2_api_key():
+    if not skip_k2_review and not get_k2_api_key():
         return {"ok": False, "error": "K2_API_KEY is not set (needed for K2 PR review)."}
 
     ws = workspace_root(workspace)
@@ -257,43 +320,57 @@ def run_orchestrate_for_prompt(
     prn = int(last_pr["number"])
     html_url = str(last_pr.get("html_url") or f"https://github.com/{owner}/{repo}/pull/{prn}")
 
-    review_out = compute_k2_pr_review(
-        gh,
-        owner,
-        repo,
-        prn,
-        model=k2_model,
-        max_diff_chars=max_diff_chars,
-        include_json_in_comment=True,
-        persona_system_prefix=review_prefix,
-        persona_dict=review_persona_dict,
-        agent_progress=prog,
-        progress_log_path=ws / "dev-sim-agents-progress.log",
-        progress_interval_sec=progress_interval_sec,
-    )
-    if not review_out.get("ok"):
-        return {
-            "ok": False,
-            "error": review_out.get("error") or "K2 review failed.",
-            "codingPass1": _serialize_run(r1),
-            "lastPr": _serialize_pr(last_pr),
+    if skip_k2_review:
+        review: dict[str, Any] = {
+            "verdict": "approve",
+            "summary": "K2 review skipped (fast path).",
+            "issues": [],
         }
+        review_out: dict[str, Any] = {"ok": True, "parse_ok": False, "review": review}
+        raw_model = ""
+        comment_md = ""
+        posted_url = None
+        verdict = "approve"
+        skip_followup = True
+        r2_summary: dict[str, Any] | None = None
+    else:
+        review_out = compute_k2_pr_review(
+            gh,
+            owner,
+            repo,
+            prn,
+            model=k2_model,
+            max_diff_chars=max_diff_chars,
+            include_json_in_comment=True,
+            persona_system_prefix=review_prefix,
+            persona_dict=review_persona_dict,
+            agent_progress=prog,
+            progress_log_path=ws / "dev-sim-agents-progress.log",
+            progress_interval_sec=progress_interval_sec,
+        )
+        if not review_out.get("ok"):
+            return {
+                "ok": False,
+                "error": review_out.get("error") or "K2 review failed.",
+                "codingPass1": _serialize_run(r1),
+                "lastPr": _serialize_pr(last_pr),
+            }
 
-    review = review_out.get("review")
-    raw_model = str(review_out.get("raw_model") or "")
-    comment_md = str(review_out.get("comment_markdown") or "")
+        review = review_out.get("review") if isinstance(review_out.get("review"), dict) else {}
+        raw_model = str(review_out.get("raw_model") or "")
+        comment_md = str(review_out.get("comment_markdown") or "")
 
-    posted_url: str | None = None
-    if not no_review_comment:
-        posted = post_pr_issue_comment(gh, owner, repo, prn, comment_md)
-        if isinstance(posted, dict):
-            posted_url = str(posted.get("html_url") or "")
+        posted_url = None
+        if not no_review_comment:
+            posted = post_pr_issue_comment(gh, owner, repo, prn, comment_md)
+            if isinstance(posted, dict):
+                posted_url = str(posted.get("html_url") or "")
 
-    verdict = (review or {}).get("verdict") if isinstance(review, dict) else None
-    skip_followup = verdict == "approve" and not always_followup
+        verdict = (review or {}).get("verdict") if isinstance(review, dict) else None
+        skip_followup = verdict == "approve" and not always_followup
 
-    r2_summary: dict[str, Any] | None = None
-    if not skip_followup:
+        r2_summary = None
+    if not skip_k2_review and not skip_followup:
         follow = _followup_prompt(
             owner=owner,
             repo=repo,
@@ -358,6 +435,7 @@ def run_orchestrate_for_prompt(
         except Exception as e:  # noqa: BLE001
             economy_snapshot = {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
+    preview_html, preview_entry = _read_workspace_preview(ws.resolve())
     return {
         "ok": True,
         "codingPass1": _serialize_run(r1),
@@ -370,6 +448,9 @@ def run_orchestrate_for_prompt(
         "lastPr": _serialize_pr(last_pr),
         "targetPush": target_push,
         "economySnapshot": economy_snapshot,
+        "workspacePath": str(ws.resolve()),
+        "previewHtml": preview_html,
+        "previewEntryPath": preview_entry,
     }
 
 

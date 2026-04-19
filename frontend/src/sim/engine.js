@@ -19,10 +19,20 @@ import { spawnFx } from '../draw/scene.js';
 
 let prCounter = 1;
 
+/** Sim tick runs every animation frame; full DOM HUD rebuild must stay throttled to avoid flicker. */
+let _hudNotifyAccum = 0;
+const HUD_NOTIFY_PERIOD = 0.12; // ~8 Hz — roster/board/top bar; canvas still redraws every frame
+
+/** Call after a full game restart so the next HUD tick can fire immediately. */
+export function resetSimHudThrottle() {
+  _hudNotifyAccum = HUD_NOTIFY_PERIOD;
+}
+
 function rand(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 // assign tickets to agents based on role + skill match at sprint start
-export function planSprint() {
+/** @param {{ quiet?: boolean }} [opts] If ``quiet``, skip the ticker line (used during full game restart). */
+export function planSprint(opts = {}) {
   const s = state.sprint;
   s.assignments = {};
   s.progress = {};
@@ -37,7 +47,9 @@ export function planSprint() {
     s.assignments[t.id] = pool[0]?.id || null;
     s.progress[t.id] = 0;
   }
-  pushTick('event', 'Scrum', `Sprint ${s.number} planned · ${s.backlog.length} tickets, ${live.length} engineers.`);
+  if (!opts.quiet) {
+    pushTick('event', 'Scrum', `Sprint ${s.number} planned · ${s.backlog.length} tickets, ${live.length} engineers.`);
+  }
 }
 
 // per-tick velocity for an agent
@@ -99,7 +111,11 @@ export function tick(dt) {
   }
 
   checkAchievements();
-  notify();
+  _hudNotifyAccum += t;
+  if (_hudNotifyAccum >= HUD_NOTIFY_PERIOD) {
+    _hudNotifyAccum = 0;
+    notify();
+  }
 }
 
 function updateSprintHeat() {
@@ -147,6 +163,16 @@ function onCommit(agent, ticket) {
 }
 
 function onTicketDone(agent, ticket) {
+  if (ticket?.source === 'planning') {
+    pushTick('pr', agent.displayName, `shipped planned work: ${ticket.title}`);
+    agent.activity = 'celebrate';
+    agent.activityTtl = 2;
+    agent.speaking = { text: 'Synced with bridge work.', ttl: 2 };
+    if (Number.isFinite(agent.px) && Number.isFinite(agent.py)) {
+      spawnFx('good', agent.px + 10, agent.py - 18);
+    }
+    return;
+  }
   // open PR
   const pr = {
     id: `PR-${prCounter++}`,
@@ -266,7 +292,7 @@ export function startSprint() {
   recomputeBurn();
   for (const a of state.team) if (!a.fired) a.sprintsServed++;
   pushTick('event', 'CEO', `Sprint ${state.sprint.number} STARTED. Burn $${state.economy.burnRate.toLocaleString()}/sprint.`);
-  notify();
+  /* pushTick already notify()s — immediate HUD refresh for sprint start */
 }
 
 function sprintSpecText() {

@@ -1,8 +1,19 @@
 // Central reactive store. Plain JS — subscribe/dispatch.
-import { SEED_BACKLOG } from '../data/personas.js';
+import { SEED_BACKLOG, ROLES } from '../data/personas.js';
 import { agentFromBackendPersona } from '../data/backendPersona.js';
 
 const listeners = new Set();
+
+/** Bumped on full game restart so late ``/api/economy`` / ``/api/company`` hydrates cannot overwrite fresh state. */
+let _economyHydrateEpoch = 0;
+
+export function bumpEconomyHydrateEpoch() {
+  _economyHydrateEpoch += 1;
+}
+
+export function economyHydrateEpoch() {
+  return _economyHydrateEpoch;
+}
 
 function clone(o) { return JSON.parse(JSON.stringify(o)); }
 
@@ -21,8 +32,12 @@ function instantiateAgent(p) {
   };
 }
 
-/** Replace roster with three dev-sim agents from ``GET /api/agents`` (coding, coding_b, review). */
-export function applyBackendTeam(payload) {
+/**
+ * Replace roster with three dev-sim agents from ``GET /api/agents`` (coding, coding_b, review).
+ * @param {Record<string, unknown>} payload
+ * @param {{ silent?: boolean }} [opts] Pass ``silent: true`` to skip ``notify`` (caller flushes once).
+ */
+export function applyBackendTeam(payload, opts = {}) {
   const a1 = agentFromBackendPersona(payload.coding, 'coding');
   const a2 = agentFromBackendPersona(payload.coding_b, 'coding_b');
   const a3 = agentFromBackendPersona(payload.review, 'review');
@@ -33,7 +48,67 @@ export function applyBackendTeam(payload) {
     review: clone(payload.review),
   };
   recomputeBurn();
-  notify();
+  if (!opts.silent) notify();
+}
+
+/** Reset client game state to Day 1 defaults (does not write Python ``company-state.json``). */
+export function resetGameState() {
+  state.paused = false;
+  state.speed = 1;
+  state.sprint.number = 1;
+  state.sprint.phase = 'planning';
+  state.sprint.elapsed = 0;
+  state.sprint.duration = 300;
+  state.sprint.backlog = clone(SEED_BACKLOG);
+  state.sprint.assignments = {};
+  state.sprint.progress = {};
+  state.team = [];
+  state.backendPersonaPayload = null;
+  state.candidatePool = [];
+  state.prs = [];
+  state.ticker = [];
+  state.achievements = [];
+  state.toasts = [];
+  state.modal = null;
+  state.ui.orchestrateBusy = false;
+  state.ui.matrixLines = [];
+  state.ui.sprintHeat = 0;
+  Object.assign(state.economy, {
+    cash: 200000,
+    mrr: 3000,
+    contracts: [],
+    burnRate: 0,
+    techDebt: 0,
+    reputation: 50,
+    leadershipKarma: 0,
+    valuation: 0,
+    activeMrr: null,
+    hypeMultiplier: 1,
+    sprintMonth: 1,
+    lastTechnicalScores: null,
+    lastSettlementBurn: null,
+    lastTycoonStatus: null,
+    pendingRecurringMrr: 0,
+    lastSprintLedger: null,
+  });
+  state.stats = {
+    commits: 0,
+    prs: 0,
+    builds: { pass: 0, fail: 0 },
+    firings: 0,
+    hires: 0,
+    wildcardHires: 0,
+    fridayShips: 0,
+    profitableSprints: 0,
+    zeroBugSprints: 0,
+    coachUses: 0,
+    sprintBugs: 0,
+  };
+  state.history = [];
+  state.newspaperHeadlines = [];
+  state.projects = [];
+  state.chatLog = [];
+  recomputeBurn();
 }
 
 export const state = {
@@ -43,7 +118,7 @@ export const state = {
     number: 1,
     phase: 'planning', // planning | execution | review | retro | hr
     elapsed: 0,
-    duration: 60, // seconds of execution per sprint
+    duration: 300, // seconds of execution per sprint
     backlog: clone(SEED_BACKLOG),
     assignments: {}, // ticketId -> agentId
     progress: {},   // ticketId -> 0..1
@@ -63,6 +138,8 @@ export const state = {
     matrixLines: [],
     /** Mean ticket progress 0–1 during execution (drives HUD / board “heat”). */
     sprintHeat: 0,
+    /** POST /api/orchestrate — skip planning and/or K2 review for shorter runs (CEO chat toggles). */
+    orchestrateOptions: { skipPlanning: false, skipK2Review: false },
   },
   economy: {
     cash: 200000,
@@ -193,8 +270,9 @@ export function applyTycoonApiResponse(payload) {
 /**
  * Merge ledger fields from GET /api/economy or orchestrate ``economySnapshot`` (snake_case).
  * @param {Record<string, unknown>} snap
+ * @param {{ silent?: boolean }} [opts]
  */
-export function applyEconomyLedgerSnapshot(snap) {
+export function applyEconomyLedgerSnapshot(snap, opts = {}) {
   if (!snap || typeof snap !== 'object' || snap.ok === false) return;
   const e = state.economy;
   if (typeof snap.balance === 'number' && Number.isFinite(snap.balance)) e.cash = snap.balance;
@@ -211,7 +289,7 @@ export function applyEconomyLedgerSnapshot(snap) {
     e.hypeMultiplier = snap.hype_multiplier;
   }
   if (typeof snap.sprint_month === 'number' && Number.isFinite(snap.sprint_month)) e.sprintMonth = snap.sprint_month;
-  notify();
+  if (!opts.silent) notify();
 }
 
 export function leadershipLabel() {
@@ -227,6 +305,67 @@ export function pushTick(kind, who, text) {
   state.ticker.push({ ts: Date.now(), kind, who, text });
   if (state.ticker.length > 80) state.ticker.shift();
   notify();
+}
+
+const _PLANNING_FEED_ASIDES = [
+  'Studio: stretching legs…',
+  'Studio: coffee refill ☕',
+  'Studio: someone brought donuts.',
+  'Studio: quick stand-up in the kitchen.',
+  'Studio: CI is green on the last push.',
+];
+
+/**
+ * Replace sprint backlog with tickets derived from bridge ``plannedSprints`` (planning model output).
+ * @param {unknown[]} plannedSprints
+ * @returns {boolean} true if backlog was updated
+ */
+export function applyPlanningSprintsToBacklog(plannedSprints) {
+  if (!Array.isArray(plannedSprints) || plannedSprints.length === 0) return false;
+  const roleCycle = ROLES.length ? ROLES : ['frontend', 'backend', 'tech_lead'];
+  const tickets = plannedSprints.map((s, i) => {
+    const row = s && typeof s === 'object' ? s : {};
+    const n = row.number != null ? row.number : i + 1;
+    const titleBit =
+      (typeof row.title === 'string' && row.title.trim()) ||
+      (typeof row.promptExcerpt === 'string' && row.promptExcerpt.trim()) ||
+      `Planned sprint ${n}`;
+    return {
+      id: `PLN-${n}`,
+      title: String(titleBit).slice(0, 220),
+      estimate: Math.max(2, Math.min(8, 3 + (i % 4))),
+      role: roleCycle[i % roleCycle.length],
+      source: 'planning',
+    };
+  });
+  state.sprint.backlog = tickets;
+  return true;
+}
+
+/** Push planning model text into the live ticker in digestible lines (with occasional studio asides). */
+export function pushPlanningFeedFromText(text) {
+  if (!text || typeof text !== 'string') return;
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const maxLines = 48;
+  const rawLines = trimmed.split(/\n/);
+  const lines = [];
+  for (const raw of rawLines) {
+    const line = raw.trim();
+    if (!line) continue;
+    if (line.length <= 220) lines.push(line);
+    else {
+      for (let i = 0; i < line.length; i += 200) lines.push(line.slice(i, i + 200));
+    }
+    if (lines.length >= maxLines) break;
+  }
+  for (let i = 0; i < lines.length; i++) {
+    pushTick('event', 'Planner', lines[i]);
+    if (i < lines.length - 1 && Math.random() < 0.12) {
+      const aside = _PLANNING_FEED_ASIDES[Math.floor(Math.random() * _PLANNING_FEED_ASIDES.length)];
+      pushTick('event', 'Studio', aside);
+    }
+  }
 }
 
 export function toast(text, kind = 'good') {
@@ -257,9 +396,24 @@ export function setOrchestrateBusy(busy) {
   notify();
 }
 
+/** Throttle: matrix lines arrive ~every 90ms; full-HUD ``notify`` that often makes the chat dock shimmer. */
+let _matrixHudNotifyTimer = 0;
+
+/** Cancel a pending throttled matrix repaint (``setOrchestrateBusy`` / next ``notify`` will paint). */
+export function flushMatrixStreamHud() {
+  if (_matrixHudNotifyTimer) {
+    clearTimeout(_matrixHudNotifyTimer);
+    _matrixHudNotifyTimer = 0;
+  }
+}
+
 /** Append one line to the Matrix-style stream (max ~32 lines). */
 export function pushMatrixStreamLine(line) {
   state.ui.matrixLines.push(String(line));
   if (state.ui.matrixLines.length > 32) state.ui.matrixLines.shift();
-  notify();
+  if (_matrixHudNotifyTimer) return;
+  _matrixHudNotifyTimer = window.setTimeout(() => {
+    _matrixHudNotifyTimer = 0;
+    notify();
+  }, 120);
 }

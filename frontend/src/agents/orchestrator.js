@@ -7,9 +7,20 @@
 // Everything emits ticker events and runs against the existing state object.
 
 import {
-  state, pushTick, toast, notify, setOrchestrateBusy, pushMatrixStreamLine, openModal, applyEconomyLedgerSnapshot,
+  state,
+  pushTick,
+  toast,
+  notify,
+  setOrchestrateBusy,
+  pushMatrixStreamLine,
+  flushMatrixStreamHud,
+  openModal,
+  applyEconomyLedgerSnapshot,
+  applyPlanningSprintsToBacklog,
+  pushPlanningFeedFromText,
 } from '../state/store.js';
-import { averageTechnicalScores } from '../data/tycoonRubric.js';
+import { planSprint } from '../sim/engine.js';
+import { averageTechnicalScores, TYCOON_TECH_KEYS } from '../data/tycoonRubric.js';
 import { ROLE_LABELS } from '../data/personas.js';
 import { pickTemplate, buildReadme, describeTemplate } from './templates.js';
 import { runDevSimOrchestrate } from './devSimBridge.js';
@@ -42,6 +53,7 @@ function stopMatrixStream() {
     clearInterval(matrixIntervalId);
     matrixIntervalId = null;
   }
+  flushMatrixStreamHud();
   setOrchestrateBusy(false);
 }
 
@@ -79,7 +91,10 @@ function reviewFromDevSim(review, verdict) {
   const wins = [];
   const v = String(verdict || review?.verdict || '').toLowerCase();
   let score = 60;
-  const ts = review && typeof review.technical_scores === 'object' ? review.technical_scores : null;
+  const ts =
+    (review && typeof review.technical_scores === 'object' && review.technical_scores) ||
+    (review && typeof review.technicalScores === 'object' && review.technicalScores) ||
+    null;
   const avgTechnical = ts ? averageTechnicalScores(ts) : null;
 
   if (review && Array.isArray(review.issues)) {
@@ -219,10 +234,13 @@ export async function runProject(prompt) {
   let api;
   startMatrixStream();
   try {
+    const orch = state.ui.orchestrateOptions || {};
     api = await runDevSimOrchestrate(prompt, {
       ...rev,
       coding: state.backendPersonaPayload?.coding,
       review: state.backendPersonaPayload?.review,
+      skipPlanning: !!orch.skipPlanning,
+      skipK2Review: !!orch.skipK2Review,
     });
   } catch (e) {
     project.phase = 'done';
@@ -245,9 +263,23 @@ export async function runProject(prompt) {
   }
 
   const planned = Array.isArray(api.plannedSprints) ? api.plannedSprints : [];
+  const fp = api.fastPath && typeof api.fastPath === 'object' ? api.fastPath : null;
+  if (fp && (fp.skipPlanning || fp.skipK2Review)) {
+    const parts = [];
+    if (fp.skipPlanning) parts.push('planning skipped');
+    if (fp.skipK2Review) parts.push('K2 review skipped');
+    pushTick('event', 'Bridge', `Fast path: ${parts.join(' · ')}.`);
+  }
+  if (typeof api.planningOutput === 'string' && api.planningOutput.trim()) {
+    pushPlanningFeedFromText(api.planningOutput);
+  }
   if (planned.length > 0) {
     const lines = planned.map((s) => `Sprint ${s.number}: ${s.title || '(untitled)'}`).join(' · ');
     emit(project, sm, `Planner split this into ${planned.length} sprint(s): ${lines}`);
+    if (applyPlanningSprintsToBacklog(planned)) {
+      planSprint({ quiet: true });
+      pushTick('event', 'Planner', `Sprint board updated with ${planned.length} planned work item(s) from the model.`);
+    }
   }
 
   const lp = api.lastPr;
@@ -275,13 +307,30 @@ export async function runProject(prompt) {
 
   const review = reviewFromDevSim(api.review, api.verdict);
   project.review = review;
-  if (review.technicalScores && typeof review.technicalScores === 'object') {
-    state.economy.lastTechnicalScores = { ...review.technicalScores };
+  const apiScoresObj =
+    (api.review?.technical_scores && typeof api.review.technical_scores === 'object' ? api.review.technical_scores : null) ||
+    (api.review?.technicalScores && typeof api.review.technicalScores === 'object' ? api.review.technicalScores : null);
+  const mergedScores =
+    review.technicalScores && typeof review.technicalScores === 'object' && Object.keys(review.technicalScores).length
+      ? review.technicalScores
+      : apiScoresObj && Object.keys(apiScoresObj).length
+        ? apiScoresObj
+        : null;
+  let rubricForHud = mergedScores;
+  if (!rubricForHud || !Object.keys(rubricForHud).length) {
+    const proxy = Math.max(1, Math.min(10, Math.round(review.score / 10)));
+    rubricForHud = Object.fromEntries(TYCOON_TECH_KEYS.map((k) => [k, proxy]));
   }
+  state.economy.lastTechnicalScores = { ...rubricForHud };
 
-  const html = buildDevSimSummaryHtml(project, prompt, lp, api);
-  project.html = html;
-  project.sanitized = sanitize(html);
+  const summaryHtml = buildDevSimSummaryHtml(project, prompt, lp, api);
+  project.summaryHtml = summaryHtml;
+  const previewRaw =
+    api.previewHtml && String(api.previewHtml).trim() ? String(api.previewHtml) : null;
+  project.workspacePath = typeof api.workspacePath === 'string' ? api.workspacePath : null;
+  project.previewEntryPath = typeof api.previewEntryPath === 'string' ? api.previewEntryPath : null;
+  project.html = previewRaw || summaryHtml;
+  project.sanitized = sanitize(previewRaw || summaryHtml);
 
   project.phase = 'review';
   setTyping(tlead);
@@ -301,6 +350,60 @@ export async function runProject(prompt) {
   project.phase = 'merging';
   const prId = lp?.number != null ? `PR-${lp.number}` : `PR-${prCounter++}`;
   project.prId = prId;
+
+  function collectBridgePrRows() {
+    const rows = [];
+    const seen = new Set();
+    const sr = Array.isArray(api.sprintResults) ? api.sprintResults : [];
+    for (const row of sr) {
+      if (!row || typeof row !== 'object') continue;
+      const lpRow = row.lastPr;
+      if (!lpRow || typeof lpRow !== 'object') continue;
+      const url = lpRow.html_url || lpRow.htmlUrl;
+      if (!url || typeof url !== 'string') continue;
+      if (seen.has(url)) continue;
+      seen.add(url);
+      rows.push({ row, lp: lpRow });
+    }
+    if (lp?.html_url && !seen.has(lp.html_url)) {
+      rows.push({ row: { number: planned.length || 1, title: project.name, ok: true }, lp });
+    }
+    return rows;
+  }
+
+  let bridgePrRows = collectBridgePrRows();
+  if (bridgePrRows.length === 0 && lp?.html_url) {
+    bridgePrRows = [{ row: { number: planned.length || 1, title: project.name, ok: true }, lp }];
+  }
+  bridgePrRows.forEach(({ row, lp: lpR }, idx) => {
+    const sn = row.number != null ? row.number : '?';
+    const url = String(lpR.html_url || '');
+    const num = lpR.number;
+    const id = num != null ? `PR-${num}` : `GH-${sn}-${idx}`;
+    const prTitle = String(lpR.title || row.title || `Sprint ${sn}`).slice(0, 200);
+    state.prs.unshift({
+      id,
+      ticket: `${project.id}-S${sn}`,
+      title: prTitle,
+      agentId: coder.id,
+      status: 'review',
+      additions: Math.max(1, Math.round(String(prTitle).length / 3)),
+      deletions: 0,
+      comments: [
+        { who: 'GitHub', text: url },
+        {
+          who: 'Planner',
+          text: `Sprint ${sn}: ${String(row.title || '').slice(0, 100)}`,
+        },
+      ],
+      openedAt: Date.now(),
+      projectId: project.id,
+      htmlUrl: url,
+      ghFullName: lpR.fullName || (lpR.owner && lpR.repo ? `${lpR.owner}/${lpR.repo}` : ''),
+    });
+    state.stats.prs++;
+  });
+  if (state.prs.length > 30) state.prs.length = 30;
   project.name = guessName(prompt, tplDesc.title);
   const summaryLine = api.review?.summary
     ? String(api.review.summary).slice(0, 200)
@@ -321,22 +424,6 @@ export async function runProject(prompt) {
     arch && arch.id !== tlead.id ? makeAgentNote(arch, 'See GitHub PR for full diff and comments.') : null,
   ].filter(Boolean));
 
-  state.prs.unshift({
-    id: prId,
-    ticket: project.id,
-    title: project.name,
-    agentId: coder.id,
-    status: review.score >= 50 ? 'merged' : 'review',
-    additions: Math.max(1, Math.round((prompt.length + summaryLine.length) / 4)),
-    deletions: 0,
-    comments: [
-      { who: tlead.displayName, text: `K2 / dev-sim — score ${review.score}/100` },
-    ],
-    openedAt: Date.now(),
-    projectId: project.id,
-  });
-  if (state.prs.length > 30) state.prs.pop();
-  state.stats.prs++;
   if (review.score >= 50) state.stats.builds.pass++;
   else state.stats.builds.fail++;
   state.stats.commits += 3 + Math.floor(Math.random() * 5);
@@ -383,16 +470,18 @@ export async function runProject(prompt) {
   emit(project, sm, `${prId} merged. Sprint log updated. Next?`);
   notify();
 
-  const ts = api.review && typeof api.review.technical_scores === 'object' ? api.review.technical_scores : null;
-  if (ts && Object.keys(ts).length) {
-    const avgTechnical = averageTechnicalScores(ts);
-    openModal('k2-audit', {
-      technicalScores: { ...ts },
-      avgTechnical,
-      approved: avgTechnical > 6,
-      projectName: project.name || project.id,
-    });
-  }
+  const avgTechnical = averageTechnicalScores(rubricForHud);
+  const usedSyntheticRubric = !mergedScores || !Object.keys(mergedScores).length;
+  openModal('k2-audit', {
+    technicalScores: { ...rubricForHud },
+    avgTechnical,
+    approved: review.score >= 50,
+    projectName: project.name || project.id,
+    usedSyntheticRubric,
+    reviewScore: review.score,
+    issues: review.issues,
+    wins: review.wins,
+  });
 
   const tp = api.targetPush;
   if (tp && tp.ok === true && !tp.skipped && tp.url) {
@@ -413,10 +502,17 @@ function guessName(prompt, fallback) {
   return fallback;
 }
 
+let _emitNotifyRaf = 0;
+
 function emit(project, agent, text) {
   project.log.push({ who: agent.displayName, role: agent.role, text, ts: Date.now() });
   pushTick('chat', agent.displayName, text);
-  notify();
+  if (!_emitNotifyRaf) {
+    _emitNotifyRaf = requestAnimationFrame(() => {
+      _emitNotifyRaf = 0;
+      notify();
+    });
+  }
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }

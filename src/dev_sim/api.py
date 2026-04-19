@@ -20,7 +20,7 @@ if _repo_s not in sys.path:
 
 from dev_sim.agents_payload import get_session_agents
 from dev_sim.economy import CompanyState, SettlementStatus
-from dev_sim.tycoon_sprint import company_state_path, run_mock_sprint
+from dev_sim.tycoon_sprint import company_state_path, reset_company_state_file, run_mock_sprint
 
 from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
@@ -118,6 +118,16 @@ def get_company() -> dict[str, Any]:
     return out
 
 
+@app.post("/api/company/reset")
+def post_company_reset() -> dict[str, Any]:
+    """Overwrite persisted :class:`CompanyState` with Day 1 defaults (matches CEO UI restart)."""
+    company = reset_company_state_file()
+    out: dict[str, Any] = asdict(company)
+    out["persisted"] = True
+    out["ok"] = True
+    return out
+
+
 @app.post("/api/simulate", response_model=SprintResponse)
 def simulate_sprint(body: SprintRequest) -> SprintResponse:
     """Thin wrapper: delegates to :func:`dev_sim.tycoon_sprint.run_mock_sprint`."""
@@ -130,4 +140,11 @@ def simulate_sprint(body: SprintRequest) -> SprintResponse:
     return SprintResponse(**data)
 
 
-__all__ = ["app", "company_state_path", "SprintRequest", "SprintResponse", "run_mock_sprint"]
+__all__ = [
+    "app",
+    "company_state_path",
+    "reset_company_state_file",
+    "SprintRequest",
+    "SprintResponse",
+    "run_mock_sprint",
+]

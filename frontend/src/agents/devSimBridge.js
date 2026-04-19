@@ -1,5 +1,5 @@
 /**
- * Calls the local dev_sim_bridge HTTP server: K2 planning (``run_planning_agent``) then
+ * Calls the local dev_sim_bridge HTTP server: Claude planning then
  * one coding → K2 → follow-up pass per planned sprint (same as ``dev-sim-run``).
  * Vite proxies ``/api`` → port 8765 in dev/preview.
  */
@@ -13,6 +13,8 @@ const API_PREFIX = (import.meta.env.VITE_DEV_SIM_API || '').replace(/\/$/, '');
  *   expectedMonthly?: number,
  *   coding?: Record<string, unknown>,
  *   review?: Record<string, unknown>,
+ *   skipPlanning?: boolean,
+ *   skipK2Review?: boolean,
  * }} [opts]
  */
 export async function runDevSimOrchestrate(prompt, opts = {}) {
@@ -22,6 +24,8 @@ export async function runDevSimOrchestrate(prompt, opts = {}) {
     prompt,
     expected_one_time: expectedOneTime,
     expected_monthly: expectedMonthly,
+    skip_planning: !!opts.skipPlanning,
+    skip_k2_review: !!opts.skipK2Review,
   };
   if (opts.coding && opts.review) {
     body.coding = opts.coding;

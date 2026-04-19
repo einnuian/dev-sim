@@ -157,13 +157,29 @@ canvas#stage {
   color: var(--ink-1);
   line-height: 1.35;
 }
+.sprint-ledger-strip .ledger-head-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
 .sprint-ledger-strip .ledger-head {
   font-size: 9px;
   letter-spacing: 0.6px;
   text-transform: uppercase;
   color: var(--accent-2);
-  margin-bottom: 4px;
   font-weight: 700;
+  flex: 1;
+  min-width: 0;
+}
+.sprint-ledger-strip .btn-ledger-stmt {
+  flex-shrink: 0;
+  font-size: 9px;
+  padding: 3px 8px;
+  text-transform: none;
+  letter-spacing: 0;
 }
 .sprint-ledger-strip .ledger-rows {
   display: flex;
@@ -466,6 +482,27 @@ body.td-crisis {
   font-weight: 700;
 }
 .btn-ghost { background: transparent; }
+.btn-tiny {
+  font-size: 10px;
+  padding: 5px 10px;
+  letter-spacing: 0.3px;
+}
+.btn-primary:disabled,
+.btn-primary.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  filter: none;
+}
+.btn-restart {
+  font-size: 10px;
+  letter-spacing: 0.4px;
+  color: var(--ink-2);
+  border-color: var(--line);
+}
+.btn-restart:hover {
+  color: var(--warn);
+  border-color: rgba(255, 209, 102, 0.45);
+}
 
 /* ---------- panels ---------- */
 .panel {
@@ -553,7 +590,8 @@ body.td-crisis {
   padding: 4px 6px;
   border-left: 2px solid var(--line);
   color: var(--ink-1);
-  animation: tickIn .3s;
+  /* No enter animation: ``renderTicker`` skips redundant repaints but full rebuilds still happen
+     when the feed changes — animating every row each time read as flicker. */
 }
 .tick .who { color: var(--accent-2); font-weight: 600; }
 .tick.commit { border-left-color: var(--good); }
@@ -731,7 +769,7 @@ body.td-crisis {
   left: 12px;
   bottom: calc(88px + 14px);
   width: 360px;
-  max-height: 280px;
+  max-height: 320px;
   display: none;
   flex-direction: column;
   background: rgba(12,17,28,0.94);
@@ -800,6 +838,27 @@ body.td-crisis {
   font-family: inherit;
   font-size: 11px;
 }
+.orch-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--line);
+  font-size: 10px;
+  color: var(--ink-1);
+}
+.orch-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  user-select: none;
+}
+.orch-opt input {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+}
 .roster-hint {
   font-size: 9px;
   color: var(--accent-2);
@@ -833,6 +892,24 @@ body.td-crisis {
   50% { box-shadow: 0 4px 24px rgba(106,215,255,.8); }
 }
 
+/* Events + shipped games share one stack panel */
+.events-shipped-panel #eventsdeck { flex-shrink: 0; }
+.events-shipped-panel #projects {
+  flex: 1;
+  min-height: 0;
+}
+.panel-title-stack {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+}
+.panel-hint {
+  font-size: 9px;
+  color: var(--ink-2);
+  line-height: 1.35;
+  margin: -4px 0 8px;
+}
+
 /* ---------- project cards (right panel) ---------- */
 #projects { display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
 .proj-card {
@@ -845,6 +922,15 @@ body.td-crisis {
   cursor: pointer;
   transition: all .12s;
 }
+.proj-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+}
+.proj-card-actions .btn { cursor: pointer; }
 .proj-card:hover { border-color: var(--accent); transform: translateX(2px); }
 .proj-card.done { border-left-color: var(--good); }
 .proj-card.review { border-left-color: var(--gold); }
