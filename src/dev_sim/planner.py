@@ -54,22 +54,29 @@ After the JSON block, write the full human-readable plan as described in your in
 
 
 def _parse_sprints(text: str) -> list[dict[str, Any]]:
+    # raw_decode follows JSON string escaping, so backticks inside prompt
+    # strings (e.g. fenced code blocks in API contracts) don't confuse it.
+    decoder = json.JSONDecoder()
+
     marker = "```json"
-    idx = text.find(marker)  # first block — JSON comes before the prose now
+    idx = text.find(marker)
     if idx != -1:
-        inner = text[idx + len(marker):]
-        end = inner.find("```")
-        if end == -1:
-            raise ValueError("Unclosed JSON block in planner response")
-        return json.loads(inner[:end].strip())
+        try:
+            result, _ = decoder.raw_decode(text[idx + len(marker):].lstrip())
+            return result
+        except json.JSONDecodeError:
+            pass
 
-    # Fallback: first bare JSON array in text
+    # Fallback: find the first "[" and parse forward from there
     start = text.find("[")
-    end = text.find("]", start) if start != -1 else -1
-    if start != -1 and end > start:
-        return json.loads(text[start : end + 1])
+    if start != -1:
+        try:
+            result, _ = decoder.raw_decode(text[start:])
+            return result
+        except json.JSONDecodeError:
+            pass
 
-    raise ValueError("No JSON sprint list found in planner response")
+    raise ValueError("No valid JSON sprint list found in planner response")
 
 
 def run_planning_agent(
