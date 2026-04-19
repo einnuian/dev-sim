@@ -9,11 +9,14 @@ from __future__ import annotations
 import json
 import re
 import sys
+from contextlib import nullcontext
+from pathlib import Path
 from typing import Any
 
 import httpx
 from openai import OpenAI
 
+from dev_sim.agent_progress import AgentProgressLogger, ProgressAnnouncer
 from dev_sim.config import K2_API_BASE, get_k2_api_key
 
 STRUCTURED_OUTPUT_INSTRUCTION = (
@@ -209,6 +212,11 @@ def compute_k2_pr_review(
     model: str,
     max_diff_chars: int = 200_000,
     include_json_in_comment: bool = True,
+    persona_system_prefix: str | None = None,
+    persona_dict: dict[str, Any] | None = None,
+    agent_progress: bool = True,
+    progress_log_path: Path | None = None,
+    progress_interval_sec: float = 10.0,
 ) -> dict[str, Any]:
     """
     Fetch PR diff, call K2, parse ``CodeReviewResult`` JSON. Does **not** post to GitHub.
@@ -239,29 +247,45 @@ def compute_k2_pr_review(
             "meta": None,
         }
 
-    meta = fetch_pr_metadata(token, owner, repo, pull_number)
-    if not meta:
-        return {
-            "ok": False,
-            "error": "Failed to fetch pull request (metadata).",
-            "review": None,
-            "raw_model": "",
-            "comment_markdown": "",
-            "parse_ok": False,
-            "meta": None,
-        }
+    log_path = progress_log_path or (Path.cwd() / "dev-sim-review-progress.log")
+    if agent_progress:
+        plog = AgentProgressLogger(log_path, agent_label="k2_review")
+        plog.log_persona_start(persona_dict)
+        progress_cm: Any = ProgressAnnouncer(
+            plog,
+            persona_dict,
+            agent_label="k2_review",
+            interval_sec=progress_interval_sec,
+        )
+    else:
+        progress_cm = nullcontext()
 
-    title = meta.get("title", "")
-    body = (meta.get("body") or "")[:8000]
-    head = (meta.get("head") or {}).get("ref", "head")
-    base = (meta.get("base") or {}).get("ref", "base")
-    html = meta.get("html_url", "")
-    user = (meta.get("user") or {}).get("login", "author")
+    with progress_cm as announcer:
+        if announcer is not None:
+            announcer.set_phase("fetching_pr")
+        meta = fetch_pr_metadata(token, owner, repo, pull_number)
+        if not meta:
+            return {
+                "ok": False,
+                "error": "Failed to fetch pull request (metadata).",
+                "review": None,
+                "raw_model": "",
+                "comment_markdown": "",
+                "parse_ok": False,
+                "meta": None,
+            }
 
-    diff = fetch_pr_diff(
-        token, owner, repo, pull_number, max_chars=max_diff_chars
-    )
-    user_msg = f"""## PR metadata
+        title = meta.get("title", "")
+        body = (meta.get("body") or "")[:8000]
+        head = (meta.get("head") or {}).get("ref", "head")
+        base = (meta.get("base") or {}).get("ref", "base")
+        html = meta.get("html_url", "")
+        user = (meta.get("user") or {}).get("login", "author")
+
+        diff = fetch_pr_diff(
+            token, owner, repo, pull_number, max_chars=max_diff_chars
+        )
+        user_msg = f"""## PR metadata
 - **Repository:** {owner}/{repo}
 - **Number:** {pull_number}
 - **Title:** {title}
@@ -277,57 +301,65 @@ def compute_k2_pr_review(
 {diff}
 ```
 """
-    client = OpenAI(api_key=k2_key, base_url=K2_API_BASE)
-    try:
-        resp = client.chat.completions.create(
-            model=model,
-            max_tokens=8192,
-            messages=[
-                {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
-                {"role": "user", "content": user_msg},
-            ],
-        )
-    except Exception as e:
+        review_system = REVIEW_SYSTEM_PROMPT
+        if persona_system_prefix and persona_system_prefix.strip():
+            review_system = (
+                persona_system_prefix.strip() + "\n\n---\n\n" + REVIEW_SYSTEM_PROMPT.strip()
+            )
+
+        client = OpenAI(api_key=k2_key, base_url=K2_API_BASE)
+        if announcer is not None:
+            announcer.set_phase("reviewing")
+        try:
+            resp = client.chat.completions.create(
+                model=model,
+                max_tokens=8192,
+                messages=[
+                    {"role": "system", "content": review_system},
+                    {"role": "user", "content": user_msg},
+                ],
+            )
+        except Exception as e:
+            return {
+                "ok": False,
+                "error": f"K2 request failed: {e}",
+                "review": None,
+                "raw_model": "",
+                "comment_markdown": "",
+                "parse_ok": False,
+                "meta": meta,
+            }
+
+        choice = resp.choices[0] if resp.choices else None
+        raw = (choice.message.content or "").strip() if choice and choice.message else ""
+        if not raw:
+            return {
+                "ok": False,
+                "error": "Empty model response",
+                "review": None,
+                "raw_model": "",
+                "comment_markdown": "",
+                "parse_ok": False,
+                "meta": meta,
+            }
+
+        review_obj = _try_parse_review_json(raw)
+        if review_obj:
+            comment_body = format_review_markdown(review_obj, include_json=include_json_in_comment)
+        else:
+            comment_body = f"### Automated code review (K2 / dev-sim)\n\n" + (
+                f"The model did not return parseable JSON. Raw response:\n\n```\n{raw[:50_000]}\n```"
+            )
+
         return {
-            "ok": False,
-            "error": f"K2 request failed: {e}",
-            "review": None,
-            "raw_model": "",
-            "comment_markdown": "",
-            "parse_ok": False,
+            "ok": True,
+            "error": None,
+            "review": review_obj,
+            "raw_model": raw,
+            "comment_markdown": comment_body,
+            "parse_ok": review_obj is not None,
             "meta": meta,
         }
-
-    choice = resp.choices[0] if resp.choices else None
-    raw = (choice.message.content or "").strip() if choice and choice.message else ""
-    if not raw:
-        return {
-            "ok": False,
-            "error": "Empty model response",
-            "review": None,
-            "raw_model": "",
-            "comment_markdown": "",
-            "parse_ok": False,
-            "meta": meta,
-        }
-
-    review_obj = _try_parse_review_json(raw)
-    if review_obj:
-        comment_body = format_review_markdown(review_obj, include_json=include_json_in_comment)
-    else:
-        comment_body = f"### Automated code review (K2 / dev-sim)\n\n" + (
-            f"The model did not return parseable JSON. Raw response:\n\n```\n{raw[:50_000]}\n```"
-        )
-
-    return {
-        "ok": True,
-        "error": None,
-        "review": review_obj,
-        "raw_model": raw,
-        "comment_markdown": comment_body,
-        "parse_ok": review_obj is not None,
-        "meta": meta,
-    }
 
 
 def run_k2_pr_review(
@@ -340,6 +372,11 @@ def run_k2_pr_review(
     post_comment: bool = True,
     max_diff_chars: int = 200_000,
     include_json: bool = True,
+    persona_system_prefix: str | None = None,
+    persona_dict: dict[str, Any] | None = None,
+    agent_progress: bool = True,
+    progress_log_path: Path | None = None,
+    progress_interval_sec: float = 10.0,
 ) -> None:
     out = compute_k2_pr_review(
         token,
@@ -349,6 +386,11 @@ def run_k2_pr_review(
         model=model,
         max_diff_chars=max_diff_chars,
         include_json_in_comment=include_json,
+        persona_system_prefix=persona_system_prefix,
+        persona_dict=persona_dict,
+        agent_progress=agent_progress,
+        progress_log_path=progress_log_path,
+        progress_interval_sec=progress_interval_sec,
     )
     if not out["ok"]:
         print(out.get("error") or "Review failed.", file=sys.stderr)

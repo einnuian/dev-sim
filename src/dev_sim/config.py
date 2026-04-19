@@ -14,6 +14,7 @@ from dotenv import load_dotenv
 
 K_ANTHROPIC_API_KEY = "ANTHROPIC_API_KEY"
 K_GITHUB_TOKEN = "GITHUB_TOKEN"
+K_DEV_SIM_PERSONAS_DIR = "DEV_SIM_PERSONAS_DIR"  # directory with trait_pools.json (see personas_bridge)
 K_ANTHROPIC_MODEL = "ANTHROPIC_MODEL"
 K_ANTHROPIC_REVIEW_MODEL = "ANTHROPIC_REVIEW_MODEL"  # reserved for a review / second agent
 
@@ -29,6 +30,8 @@ K_K2_API_KEY = "K2_API_KEY"
 K2_REVIEW_MODEL = "K2_REVIEW_MODEL"
 
 DEFAULT_REPO_REGISTRY = "repo-registry.json"
+# When coding persona role is omitted (CLI default or ``None`` in ``coding_persona_bundle``).
+DEFAULT_CODING_PERSONA_ROLE = "backend"
 
 # Backward-compatible alias (code may use either name)
 DEFAULT_MODEL = DEFAULT_CODING_MODEL

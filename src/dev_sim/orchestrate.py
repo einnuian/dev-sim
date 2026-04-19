@@ -8,8 +8,15 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from dev_sim.personas_bridge import (
+    apply_personas_dir_from_cli,
+    coding_persona_bundle,
+    review_persona_bundle,
+)
+
 from dev_sim.coding_agent import run_coding_agent, workspace_root
 from dev_sim.config import (
+    DEFAULT_CODING_PERSONA_ROLE,
     DEFAULT_REPO_REGISTRY,
     get_github_token,
     load_env,
@@ -121,7 +128,44 @@ def main() -> None:
         default=200_000,
         help="Truncate PR unified diff for K2 context",
     )
+    parser.add_argument(
+        "--persona-role",
+        choices=("backend", "frontend"),
+        default=DEFAULT_CODING_PERSONA_ROLE,
+        help="Coding passes: backend or frontend persona after operational prompt (default: backend)",
+    )
+    parser.add_argument(
+        "--persona-seed",
+        type=int,
+        default=None,
+        help="RNG seed for coding persona (both coding passes)",
+    )
+    parser.add_argument(
+        "--review-persona-seed",
+        type=int,
+        default=None,
+        help="RNG seed for tech-lead review persona (default: same as --persona-seed if set)",
+    )
+    parser.add_argument(
+        "--personas-dir",
+        type=Path,
+        default=None,
+        help="Directory with trait_pools.json (sets DEV_SIM_PERSONAS_DIR)",
+    )
+    parser.add_argument(
+        "--no-agent-progress",
+        action="store_true",
+        help="Disable periodic progress logs for coding and review passes",
+    )
+    parser.add_argument(
+        "--progress-interval",
+        type=float,
+        default=10.0,
+        help="Seconds between progress announcements (default: 10)",
+    )
     args = parser.parse_args()
+
+    apply_personas_dir_from_cli(args.personas_dir)
 
     if args.prompt_file:
         text = args.prompt_file.read_text(encoding="utf-8").strip()
@@ -145,6 +189,16 @@ def main() -> None:
         else (Path.cwd() / DEFAULT_REPO_REGISTRY).resolve()
     )
 
+    coding_suffix, coding_persona_dict = coding_persona_bundle(args.persona_role, args.persona_seed)
+    review_seed = (
+        args.review_persona_seed
+        if args.review_persona_seed is not None
+        else args.persona_seed
+    )
+    review_prefix, review_persona_dict = review_persona_bundle(review_seed)
+    prog = not args.no_agent_progress
+    prog_iv = args.progress_interval
+
     print("--- Pass 1: coding agent ---", file=sys.stderr)
     print(f"Workspace: {ws}", file=sys.stderr)
     print(f"Repo registry: {reg}", file=sys.stderr)
@@ -155,6 +209,11 @@ def main() -> None:
         max_turns=args.max_turns,
         github_token=gh,
         repo_registry_path=reg,
+        persona_system_suffix=coding_suffix,
+        persona_dict=coding_persona_dict,
+        agent_progress=prog,
+        progress_log_path=ws / "dev-sim-agent-progress.log",
+        progress_interval_sec=prog_iv,
     )
     last_pr = r1.get("last_pr")
     if not last_pr or not last_pr.get("number"):
@@ -178,6 +237,11 @@ def main() -> None:
         model=k2_model,
         max_diff_chars=args.max_diff_chars,
         include_json_in_comment=True,
+        persona_system_prefix=review_prefix,
+        persona_dict=review_persona_dict,
+        agent_progress=prog,
+        progress_log_path=ws / "dev-sim-review-progress.log",
+        progress_interval_sec=prog_iv,
     )
     if not review_out.get("ok"):
         print(f"K2 review failed: {review_out.get('error')}", file=sys.stderr)
@@ -223,6 +287,11 @@ def main() -> None:
         max_turns=args.followup_max_turns,
         github_token=gh,
         repo_registry_path=reg,
+        persona_system_suffix=coding_suffix,
+        persona_dict=coding_persona_dict,
+        agent_progress=prog,
+        progress_log_path=ws / "dev-sim-agent-progress.log",
+        progress_interval_sec=prog_iv,
     )
 
 

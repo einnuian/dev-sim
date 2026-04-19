@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from dev_sim.config import get_github_token, load_env, resolve_k2_review_model
 from dev_sim.review_agent import run_k2_pr_review
@@ -43,12 +44,46 @@ def main() -> None:
         action="store_true",
         help="Omit the collapsible raw CodeReviewResult JSON from the comment body",
     )
+    p.add_argument(
+        "--persona-seed",
+        type=int,
+        default=None,
+        help="RNG seed for reproducible tech-lead review persona",
+    )
+    p.add_argument(
+        "--personas-dir",
+        type=Path,
+        default=None,
+        help="Directory with trait_pools.json (sets DEV_SIM_PERSONAS_DIR)",
+    )
+    p.add_argument(
+        "--no-agent-progress",
+        action="store_true",
+        help="Disable periodic progress announcements and review progress log",
+    )
+    p.add_argument(
+        "--progress-log",
+        type=Path,
+        default=None,
+        help="Append progress log here (default: ./dev-sim-review-progress.log)",
+    )
+    p.add_argument(
+        "--progress-interval",
+        type=float,
+        default=10.0,
+        help="Seconds between progress announcements (default: 10)",
+    )
     args = p.parse_args()
+
+    from dev_sim.personas_bridge import apply_personas_dir_from_cli, review_persona_bundle
+
+    apply_personas_dir_from_cli(args.personas_dir)
     token = get_github_token()
     if not token:
         print("GITHUB_TOKEN is required in the environment (or .env).", file=sys.stderr)
         sys.exit(1)
     model = resolve_k2_review_model(args.model)
+    prefix, persona_dict = review_persona_bundle(args.persona_seed)
     run_k2_pr_review(
         token,
         args.owner,
@@ -58,6 +93,11 @@ def main() -> None:
         post_comment=not args.no_post,
         max_diff_chars=args.max_diff_chars,
         include_json=not args.no_json_in_comment,
+        persona_system_prefix=prefix,
+        persona_dict=persona_dict,
+        agent_progress=not args.no_agent_progress,
+        progress_log_path=args.progress_log,
+        progress_interval_sec=args.progress_interval,
     )
 
 

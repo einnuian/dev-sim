@@ -7,8 +7,12 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .dev-sim-workspace/
+dev-sim-agent-progress.log
+dev-sim-review-progress.log
 dist/
 build/
 
 node_modules/
 dist/
+
+tests/

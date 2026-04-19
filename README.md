@@ -308,6 +308,19 @@ The `dev-sim` package exposes a small CLI (`dev-sim` entry point) that loads env
 - `ANTHROPIC_REVIEW_MODEL` — reserved for a second (e.g. review) agent; falls back to `ANTHROPIC_MODEL` then a built-in default.
 - `K2_API_KEY` — required for **`dev-sim-review`**, the pull-request review command (K2 Think over the OpenAI-compatible API).
 - `K2_REVIEW_MODEL` — optional K2 model id for that command; default is `MBZUAI-IFM/K2-Think-v2` (overridden by `dev-sim-review -m`).
+- `DEV_SIM_PERSONAS_DIR` — optional path to the [`personas/`](personas/) directory (`trait_pools.json`). When unset, [`src/dev_sim/personas_bridge.py`](src/dev_sim/personas_bridge.py) assumes a checkout layout (`<repo>/personas`). Installed wheels do not ship `personas/`; set this env var (or use `--personas-dir` on the CLIs below) if you use persona flags outside the repo.
+
+**DevTeam personas (on by default)**
+
+[`personas/generate_persona.py`](personas/generate_persona.py) samples roles `backend`, `frontend`, and `tech_lead`. The coding entry points always append a **backend** (default) or **frontend** persona slice after the operational system prompt; K2 review always prepends a **tech lead** slice before the JSON review contract. Override coding role with `--persona-role frontend`; use `--persona-seed` / `--review-persona-seed` (orchestrate) for reproducible sampling. The default coding role is `DEFAULT_CODING_PERSONA_ROLE` in [`src/dev_sim/config.py`](src/dev_sim/config.py) (currently `backend`).
+
+- `dev-sim [--persona-role backend|frontend] [--persona-seed N] [--personas-dir PATH] "…"`
+- `dev-sim-review … [--persona-seed N] [--personas-dir PATH]`
+- `dev-sim-orchestrate … [--persona-role backend|frontend] [--persona-seed N] [--review-persona-seed N] [--personas-dir PATH]`
+
+**Agent progress log**
+
+While a coding or review run is in flight, a background thread emits **in-character progress lines** about every **10 seconds** (tone follows `communication_style` from the sampled persona). Lines go to **`dev-sim-agent-progress.log`** under the workspace (coding) or **`dev-sim-review-progress.log`** in the current directory (standalone `dev-sim-review`), and are mirrored to stderr. The log starts with a **full persona JSON** snapshot. Disable with `--no-agent-progress` on `dev-sim`, `dev-sim-review`, or `dev-sim-orchestrate`; override interval with `--progress-interval SEC` (or `dev-sim` / `dev-sim-review` `--progress-log PATH`).
 
 **PR review (`dev-sim-review`)**
 

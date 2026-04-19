@@ -10,6 +10,7 @@ import json
 import shutil
 import subprocess
 import sys
+from contextlib import nullcontext
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -17,6 +18,7 @@ from urllib.parse import urlparse
 import anthropic
 import httpx
 
+from dev_sim.agent_progress import AgentProgressLogger, ProgressAnnouncer
 from dev_sim.config import get_anthropic_api_key, load_env
 
 ALLOWED_GIT_SUBCOMMANDS = frozenset(
@@ -787,6 +789,11 @@ def run_coding_agent(
     max_turns: int,
     github_token: str | None,
     repo_registry_path: Path,
+    persona_system_suffix: str | None = None,
+    persona_dict: dict[str, Any] | None = None,
+    agent_progress: bool = True,
+    progress_log_path: Path | None = None,
+    progress_interval_sec: float = 10.0,
 ) -> dict[str, Any]:
     load_env()
     api_key = get_anthropic_api_key()
@@ -798,82 +805,103 @@ def run_coding_agent(
     tools = _tool_specs()
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_prompt}]
     last_pr: dict[str, Any] | None = None
+    system_text = SYSTEM_PROMPT
+    if persona_system_suffix and persona_system_suffix.strip():
+        system_text = SYSTEM_PROMPT.rstrip() + "\n\n---\n\n" + persona_system_suffix.strip()
 
-    for _ in range(max_turns):
-        message = client.messages.create(
-            model=model,
-            max_tokens=8192,
-            system=SYSTEM_PROMPT,
-            tools=tools,
-            messages=messages,
+    log_path = progress_log_path or (workspace / "dev-sim-agent-progress.log")
+    if agent_progress:
+        plog = AgentProgressLogger(log_path, agent_label="coding")
+        plog.log_persona_start(persona_dict)
+        progress_cm: Any = ProgressAnnouncer(
+            plog,
+            persona_dict,
+            agent_label="coding",
+            interval_sec=progress_interval_sec,
         )
+    else:
+        progress_cm = nullcontext()
 
-        # Normal completion: print assistant text and exit the loop.
-        if message.stop_reason == "end_turn":
+    with progress_cm as announcer:
+        for _ in range(max_turns):
+            if announcer is not None:
+                announcer.set_phase("awaiting_model")
+            message = client.messages.create(
+                model=model,
+                max_tokens=8192,
+                system=system_text,
+                tools=tools,
+                messages=messages,
+            )
+
+            # Normal completion: print assistant text and exit the loop.
+            if message.stop_reason == "end_turn":
+                for block in message.content:
+                    if _block_type(block) == "text":
+                        t = getattr(block, "text", None)
+                        if t is None and isinstance(block, dict):
+                            t = block.get("text")
+                        if t:
+                            print(t)
+                return {"last_pr": last_pr, "stop": "end_turn"}
+
+            # e.g. max_tokens, refusal — print any text then stop (no tool_results to send).
+            if message.stop_reason != "tool_use":
+                for block in message.content:
+                    if _block_type(block) == "text":
+                        t = getattr(block, "text", None)
+                        if t is None and isinstance(block, dict):
+                            t = block.get("text")
+                        if t:
+                            print(t)
+                if message.stop_reason:
+                    print(f"(stop_reason: {message.stop_reason})", file=sys.stderr)
+                return {"last_pr": last_pr, "stop": str(message.stop_reason)}
+
+            # Assistant asked for one or more tools: run them and send results in a single user message.
+            if announcer is not None:
+                announcer.set_phase("running_tools")
+            tool_results: list[dict[str, Any]] = []
+
             for block in message.content:
-                if _block_type(block) == "text":
-                    t = getattr(block, "text", None)
-                    if t is None and isinstance(block, dict):
-                        t = block.get("text")
-                    if t:
-                        print(t)
-            return {"last_pr": last_pr, "stop": "end_turn"}
+                if _block_type(block) != "tool_use":
+                    continue
+                tid = getattr(block, "id", None) or (block.get("id") if isinstance(block, dict) else None)
+                tname = getattr(block, "name", None) or (
+                    block.get("name") if isinstance(block, dict) else None
+                )
+                raw_in = getattr(block, "input", None)
+                if raw_in is None and isinstance(block, dict):
+                    raw_in = block.get("input")
+                tinput = raw_in if isinstance(raw_in, dict) else {}
+                print(f"[tool] {tname}({json.dumps(tinput)[:500]}…)", file=sys.stderr)
+                result = _execute_tool(
+                    str(tname), tinput, workspace, github_token, repo_registry_path
+                )
+                if (
+                    tname == "create_github_pull_request"
+                    and isinstance(result, dict)
+                    and result.get("ok")
+                    and result.get("number") is not None
+                ):
+                    last_pr = {
+                        "owner": str(result.get("owner", "")),
+                        "repo": str(result.get("repo", "")),
+                        "number": int(result["number"]),
+                        "html_url": str(result.get("html_url") or ""),
+                        "title": str(result.get("title") or ""),
+                    }
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": tid,
+                        "content": json.dumps(result, ensure_ascii=False),
+                    }
+                )
 
-        # e.g. max_tokens, refusal — print any text then stop (no tool_results to send).
-        if message.stop_reason != "tool_use":
-            for block in message.content:
-                if _block_type(block) == "text":
-                    t = getattr(block, "text", None)
-                    if t is None and isinstance(block, dict):
-                        t = block.get("text")
-                    if t:
-                        print(t)
-            if message.stop_reason:
-                print(f"(stop_reason: {message.stop_reason})", file=sys.stderr)
-            return {"last_pr": last_pr, "stop": str(message.stop_reason)}
+            # Echo assistant message verbatim (required), then attach tool results by tool_use_id.
+            messages.append({"role": "assistant", "content": message.content})
+            messages.append({"role": "user", "content": tool_results})
 
-        # Assistant asked for one or more tools: run them and send results in a single user message.
-        tool_results: list[dict[str, Any]] = []
-
-        for block in message.content:
-            if _block_type(block) != "tool_use":
-                continue
-            tid = getattr(block, "id", None) or (block.get("id") if isinstance(block, dict) else None)
-            tname = getattr(block, "name", None) or (
-                block.get("name") if isinstance(block, dict) else None
-            )
-            raw_in = getattr(block, "input", None)
-            if raw_in is None and isinstance(block, dict):
-                raw_in = block.get("input")
-            tinput = raw_in if isinstance(raw_in, dict) else {}
-            print(f"[tool] {tname}({json.dumps(tinput)[:500]}…)", file=sys.stderr)
-            result = _execute_tool(
-                str(tname), tinput, workspace, github_token, repo_registry_path
-            )
-            if (
-                tname == "create_github_pull_request"
-                and isinstance(result, dict)
-                and result.get("ok")
-                and result.get("number") is not None
-            ):
-                last_pr = {
-                    "owner": str(result.get("owner", "")),
-                    "repo": str(result.get("repo", "")),
-                    "number": int(result["number"]),
-                    "html_url": str(result.get("html_url") or ""),
-                    "title": str(result.get("title") or ""),
-                }
-            tool_results.append(
-                {
-                    "type": "tool_result",
-                    "tool_use_id": tid,
-                    "content": json.dumps(result, ensure_ascii=False),
-                }
-            )
-
-        # Echo assistant message verbatim (required), then attach tool results by tool_use_id.
-        messages.append({"role": "assistant", "content": message.content})
-        messages.append({"role": "user", "content": tool_results})
-
-    print(f"Stopped after {max_turns} turns (max_turns limit).", file=sys.stderr)
-    return {"last_pr": last_pr, "stop": "max_turns"}
+        print(f"Stopped after {max_turns} turns (max_turns limit).", file=sys.stderr)
+        return {"last_pr": last_pr, "stop": "max_turns"}

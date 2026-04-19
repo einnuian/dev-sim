@@ -364,6 +364,88 @@ def generate_one(pools: dict, role: str | None, rng: random.Random) -> dict:
     return persona
 
 
+def _identity_section(p: dict) -> str:
+    """XML-ish identity block (display name, git author for in-sim commits)."""
+    role_key = p["role"]
+    title = _ROLE_TITLE[role_key]
+    gid = p["git_identity"]
+    return (
+        "<identity>\n"
+        f"You are {p['display_name']}, a {p['seniority']} {title} "
+        f"with about {p['years_experience']} years of experience. "
+        "You are a teammate in DevTeam Simulator.\n"
+        f"Use git author name \"{gid['name']}\" and email \"{gid['email']}\" when committing as this teammate.\n"
+        "</identity>"
+    )
+
+
+def _responsibilities_section(p: dict) -> str:
+    role_key = p["role"]
+    duties = _ROLE_DUTIES[role_key]
+    listen = _ROLE_LISTEN[role_key]
+    return (
+        "<responsibilities>\n"
+        f"{duties}\n"
+        f"{listen}\n"
+        "</responsibilities>"
+    )
+
+
+def persona_slice_for_coding(persona: dict) -> str:
+    """
+    Persona + role voice for **Claude coding agent** (backend or frontend).
+
+    Excludes ``<git_workflow>`` — merge with app-owned operational prompt (registry, tools).
+    """
+    role_key = persona["role"]
+    if role_key not in ("frontend", "backend"):
+        raise ValueError("persona_slice_for_coding requires role 'frontend' or 'backend'")
+    review_pr = _REVIEW_PR[role_key]
+    examples = _ROLE_EXAMPLES[role_key]
+    sections: list[str] = [
+        _identity_section(persona),
+        _persona_block(persona),
+        _responsibilities_section(persona),
+        f"<rules>\n{_RULES}\n</rules>",
+        (
+            "<output_format>\n"
+            f"{_OUTPUT_CONTRACT}\n"
+            f"{review_pr}\n"
+            "</output_format>"
+        ),
+        f"<examples>\n{examples}\n</examples>",
+    ]
+    return "\n\n".join(sections)
+
+
+def persona_slice_for_review(persona: dict) -> str:
+    """
+    Persona + tech-lead voice for **K2 PR review** (JSON contract comes from the app, after this block).
+
+    Omits standup/ADR ``_OUTPUT_CONTRACT`` and ``<git_workflow>`` — avoids conflicting with CodeReviewResult JSON.
+    """
+    if persona["role"] != "tech_lead":
+        raise ValueError("persona_slice_for_review requires role 'tech_lead'")
+    review_pr = _REVIEW_PR["tech_lead"]
+    examples = _ROLE_EXAMPLES["tech_lead"]
+    sections: list[str] = [
+        _identity_section(persona),
+        _persona_block(persona),
+        _responsibilities_section(persona),
+        f"<rules>\n{_RULES}\n</rules>",
+        (
+            "<review_framing>\n"
+            "For this task your **machine-readable** output is defined in the following system block "
+            "(single JSON object). In threads you would still use the team's tone; here prioritize "
+            "accurate structured review.\n"
+            f"{review_pr}\n"
+            "</review_framing>"
+        ),
+        f"<examples>\n{examples}\n</examples>",
+    ]
+    return "\n\n".join(sections)
+
+
 def _persona_block(p: dict) -> str:
     fields: list[tuple[str, str]] = [
         ("traits", _format_list(p["personality_traits"])),
@@ -387,40 +469,29 @@ def generate_prompt(persona: dict) -> str:
     """Structured system prompt — identity, persona, rules, format, examples, git workflow."""
     p = persona
     role_key = p["role"]
-    title = _ROLE_TITLE[role_key]
-    duties = _ROLE_DUTIES[role_key]
-    listen = _ROLE_LISTEN[role_key]
-    review_pr = _REVIEW_PR[role_key]
-    examples = _ROLE_EXAMPLES[role_key]
-
-    gid = p["git_identity"]
-    sections: list[str] = [
-        (
-            "<identity>\n"
-            f"You are {p['display_name']}, a {p['seniority']} {title} "
-            f"with about {p['years_experience']} years of experience. "
-            "You are a teammate in DevTeam Simulator.\n"
-            f"Use git author name \"{gid['name']}\" and email \"{gid['email']}\" when committing as this teammate.\n"
-            "</identity>"
-        ),
-        _persona_block(p),
-        (
-            "<responsibilities>\n"
-            f"{duties}\n"
-            f"{listen}\n"
-            "</responsibilities>"
-        ),
-        f"<rules>\n{_RULES}\n</rules>",
-        (
-            "<output_format>\n"
-            f"{_OUTPUT_CONTRACT}\n"
-            f"{review_pr}\n"
-            "</output_format>"
-        ),
-        f"<examples>\n{examples}\n</examples>",
-        f"<git_workflow>\n{_GIT_AND_PR_WORKFLOW}\n</git_workflow>",
-    ]
-    return "\n\n".join(sections)
+    if role_key in ("frontend", "backend"):
+        body = persona_slice_for_coding(p)
+    elif role_key == "tech_lead":
+        review_pr = _REVIEW_PR["tech_lead"]
+        examples = _ROLE_EXAMPLES["tech_lead"]
+        body = "\n\n".join(
+            [
+                _identity_section(p),
+                _persona_block(p),
+                _responsibilities_section(p),
+                f"<rules>\n{_RULES}\n</rules>",
+                (
+                    "<output_format>\n"
+                    f"{_OUTPUT_CONTRACT}\n"
+                    f"{review_pr}\n"
+                    "</output_format>"
+                ),
+                f"<examples>\n{examples}\n</examples>",
+            ]
+        )
+    else:
+        raise ValueError(f"unknown role: {role_key}")
+    return body + f"\n\n<git_workflow>\n{_GIT_AND_PR_WORKFLOW}\n</git_workflow>"
 
 
 def main() -> None:

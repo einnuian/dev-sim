@@ -9,6 +9,7 @@ from pathlib import Path
 from dev_sim.coding_agent import run_coding_agent, workspace_root
 from dev_sim.config import (
     DEFAULT_CODING_MODEL,
+    DEFAULT_CODING_PERSONA_ROLE,
     DEFAULT_REPO_REGISTRY,
     K_ANTHROPIC_MODEL,
     get_github_token,
@@ -60,7 +61,46 @@ def main() -> None:
             f"(default: ./{DEFAULT_REPO_REGISTRY} under current directory)"
         ),
     )
+    parser.add_argument(
+        "--persona-role",
+        choices=("backend", "frontend"),
+        default=DEFAULT_CODING_PERSONA_ROLE,
+        help="DevTeam coding persona slice after the operational system prompt (default: backend)",
+    )
+    parser.add_argument(
+        "--persona-seed",
+        type=int,
+        default=None,
+        help="RNG seed for reproducible coding persona sampling",
+    )
+    parser.add_argument(
+        "--personas-dir",
+        type=Path,
+        default=None,
+        help="Directory with trait_pools.json (sets DEV_SIM_PERSONAS_DIR; default: ./personas from repo root)",
+    )
+    parser.add_argument(
+        "--no-agent-progress",
+        action="store_true",
+        help="Disable 10s progress announcements and progress log file",
+    )
+    parser.add_argument(
+        "--progress-log",
+        type=Path,
+        default=None,
+        help="Append progress log here (default: <workspace>/dev-sim-agent-progress.log)",
+    )
+    parser.add_argument(
+        "--progress-interval",
+        type=float,
+        default=30.0,
+        help="Seconds between in-character progress announcements (default: 10)",
+    )
     args = parser.parse_args()
+
+    from dev_sim.personas_bridge import apply_personas_dir_from_cli, coding_persona_bundle
+
+    apply_personas_dir_from_cli(args.personas_dir)
 
     if args.prompt_file:
         text = args.prompt_file.read_text(encoding="utf-8").strip()
@@ -80,6 +120,7 @@ def main() -> None:
     )
     print(f"Workspace: {ws}", file=sys.stderr)
     print(f"Repo registry: {reg}", file=sys.stderr)
+    persona_suffix, persona_dict = coding_persona_bundle(args.persona_role, args.persona_seed)
     run_coding_agent(
         text,
         workspace=ws,
@@ -87,6 +128,11 @@ def main() -> None:
         max_turns=args.max_turns,
         github_token=gh,
         repo_registry_path=reg,
+        persona_system_suffix=persona_suffix,
+        persona_dict=persona_dict,
+        agent_progress=not args.no_agent_progress,
+        progress_log_path=args.progress_log,
+        progress_interval_sec=args.progress_interval,
     )
 
 
