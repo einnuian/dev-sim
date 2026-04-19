@@ -1,5 +1,6 @@
 .env
 .env.*
+<<<<<<< HEAD
 !.env.example
 repo-registry.json
 .venv/
@@ -16,3 +17,8 @@ node_modules/
 dist/
 
 tests/
+=======
+.DS_Store
+.vscode/
+.idea/
+>>>>>>> origin/llm-prompt
