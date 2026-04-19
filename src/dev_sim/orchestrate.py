@@ -99,11 +99,11 @@ def main() -> None:
         default=None,
         help="Claude model id (default from ANTHROPIC_MODEL / built-in)",
     )
-    parser.add_argument("--max-turns", type=int, default=24, help="Max turns for the first coding pass")
+    parser.add_argument("--max-turns", type=int, default=60, help="Max turns for the first coding pass")
     parser.add_argument(
         "--followup-max-turns",
         type=int,
-        default=24,
+        default=60,
         help="Max turns for the follow-up coding pass after review",
     )
     parser.add_argument("--repo-registry", type=Path, help=f"Repo registry JSON (default: ./{DEFAULT_REPO_REGISTRY})")

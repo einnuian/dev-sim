@@ -1,4 +1,4 @@
-"""HTTP API for the CEO UI: forwards prompts to ``dev_sim`` coding + review agents."""
+"""HTTP API for the CEO UI: forwards prompts to ``dev_sim`` (orchestrate uses lead coding + review; roster has two coders)."""
 
 from __future__ import annotations
 

@@ -102,7 +102,7 @@ def get_agents(
     seed: Optional[int] = Query(None, description="RNG seed used only on the first sample for this process."),
     refresh: bool = Query(False, description="If true, discard cached personas and sample again."),
 ) -> dict[str, Any]:
-    """Personas for the two dev-sim agents; sampled once per process then reused (unless ``refresh``)."""
+    """Personas for three dev-sim agents (coding, coding_b, review); sampled once per process then reused (unless ``refresh``)."""
     rs = None if seed is None else seed ^ 0x9E3779B9
     return get_session_agents(coding_seed=seed, review_seed=rs, force_refresh=refresh)
 

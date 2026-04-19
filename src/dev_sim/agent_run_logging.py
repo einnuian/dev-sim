@@ -118,7 +118,7 @@ def log_get_api_agents_payload(
     workspace: Path | None = None,
     event: str = "GET /api/agents",
 ) -> None:
-    """Log the coding + review persona dicts (e.g. after each successful ``GET /api/agents``)."""
+    """Log the coding, coding_b, and review persona dicts (e.g. after each ``GET /api/agents``)."""
     ws = workspace if workspace is not None else Path.cwd() / ".dev-sim-workspace"
     ensure_personas_logfile(ws)
     body = json.dumps(agents, indent=2, ensure_ascii=False)

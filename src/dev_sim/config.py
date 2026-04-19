@@ -78,7 +78,7 @@ def resolve_k2_api_base() -> str:
 
 
 def resolve_k2_review_model(override: str | None) -> str:
-    """K2/Think model id for the PR review agent (OpenAI-compatible API at K2_API_BASE)."""
+    """K2/Think model id for PR review and sprint planning (OpenAI-compatible API at K2_API_BASE)."""
     if override and override.strip():
         return override.strip()
     for key in (K2_REVIEW_MODEL,):

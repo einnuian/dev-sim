@@ -50,8 +50,8 @@ def main() -> None:
     parser.add_argument(
         "--max-turns",
         type=int,
-        default=24,
-        help="Maximum agent turns (default: 24)",
+        default=60,
+        help="Maximum agent turns (default: 60)",
     )
     parser.add_argument(
         "--repo-registry",

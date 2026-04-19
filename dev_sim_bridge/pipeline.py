@@ -42,8 +42,8 @@ def run_planned_orchestrate_for_prompt(
     repo_root: Path,
     workspace: Path | None = None,
     repo_registry: Path | None = None,
-    max_turns: int = 24,
-    followup_max_turns: int = 24,
+    max_turns: int = 60,
+    followup_max_turns: int = 60,
     max_diff_chars: int = 200_000,
     always_followup: bool = False,
     no_review_comment: bool = False,
@@ -55,7 +55,7 @@ def run_planned_orchestrate_for_prompt(
     review_persona: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
-    Same env checks as ``run_orchestrate_for_prompt``, then ``run_planning_agent``,
+    Same env checks as ``run_orchestrate_for_prompt``, then K2 ``run_planning_agent``,
     then one full orchestrate pass per planned sprint (sequential, shared workspace).
 
     On success, top-level ``lastPr`` / ``review`` / ``verdict`` / ``codingPass1`` / etc.
@@ -67,14 +67,14 @@ def run_planned_orchestrate_for_prompt(
     if not t:
         return {"ok": False, "error": "Prompt is empty."}
     if not get_anthropic_api_key():
-        return {"ok": False, "error": "ANTHROPIC_API_KEY is not set (needed for planning and coding)."}
+        return {"ok": False, "error": "ANTHROPIC_API_KEY is not set (needed for the coding agent)."}
     if not (get_github_token() or "").strip():
         return {"ok": False, "error": "GITHUB_TOKEN is not set (needed for PRs and review)."}
     if not get_k2_api_key():
-        return {"ok": False, "error": "K2_API_KEY is not set (needed for K2 PR review)."}
+        return {"ok": False, "error": "K2_API_KEY is not set (needed for K2 planning and PR review)."}
 
     try:
-        sprints = run_planning_agent(t, model=None, planning_prompt_path=None)
+        sprints = run_planning_agent(t, k2_model=None, planning_prompt_path=None)
     except Exception as e:  # noqa: BLE001 — return to UI
         return {"ok": False, "error": f"Planning failed: {e}"}
 
@@ -177,8 +177,8 @@ def run_orchestrate_for_prompt(
     repo_root: Path,
     workspace: Path | None = None,
     repo_registry: Path | None = None,
-    max_turns: int = 24,
-    followup_max_turns: int = 24,
+    max_turns: int = 60,
+    followup_max_turns: int = 60,
     max_diff_chars: int = 200_000,
     always_followup: bool = False,
     no_review_comment: bool = False,

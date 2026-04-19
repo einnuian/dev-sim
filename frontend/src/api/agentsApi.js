@@ -1,13 +1,17 @@
 /**
- * Load the two dev-sim agents (coding + review) from the backend.
+ * Load three dev-sim agents (coding, coding_b, review) from the backend.
  * Vite proxies ``/api/agents`` to ``dev_sim_bridge`` on port 8765 (``python -m dev_sim_bridge``).
  * Alternatively run ``python run_api.py`` on 8000 and point Vite at that port.
  */
 
 function unwrapAgentsPayload(data) {
   if (!data || typeof data !== 'object') return null;
-  if (data.ok && data.coding && data.review) return { coding: data.coding, review: data.review };
-  if (data.coding && data.review) return { coding: data.coding, review: data.review };
+  if (data.ok && data.coding && data.coding_b && data.review) {
+    return { coding: data.coding, coding_b: data.coding_b, review: data.review };
+  }
+  if (data.coding && data.coding_b && data.review) {
+    return { coding: data.coding, coding_b: data.coding_b, review: data.review };
+  }
   return null;
 }
 

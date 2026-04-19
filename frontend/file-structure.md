@@ -36,7 +36,7 @@ frontend/
 │   │   ├── dialogue.js        # Stand-up / PR / retro lines
 │   │   └── events.js          # Event deck, levers, achievements
 │   └── agents/
-│       ├── orchestrator.js    # CEO prompt → dev_sim coding + K2 review (via bridge)
+│       ├── orchestrator.js    # CEO prompt → dev_sim (lead coder + K2 review; pair coder in-world)
 │       ├── devSimBridge.js      # POST /api/orchestrate → bridge (plan + dev-sim-run per sprint)
 │       └── templates.js       # README scaffolding + template metadata
 ├── developer.md

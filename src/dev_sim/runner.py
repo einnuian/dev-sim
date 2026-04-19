@@ -13,6 +13,7 @@ from dev_sim.config import (
     DEFAULT_CODING_PERSONA_ROLE,
     DEFAULT_REPO_REGISTRY,
     get_github_token,
+    get_k2_api_key,
     load_env,
     resolve_coding_model,
     resolve_k2_review_model,
@@ -155,11 +156,16 @@ def main() -> None:
         default=None,
         help="Skip planning and load sprints from a JSON file (output of dev-sim-plan)",
     )
-    parser.add_argument("-m", "--model", default=None, help="Claude model id")
+    parser.add_argument("-m", "--model", default=None, help="Claude model id (coding passes only)")
+    parser.add_argument(
+        "--planning-model",
+        default=None,
+        help="K2 model id for sprint planning (default: K2_REVIEW_MODEL env, then built-in)",
+    )
     parser.add_argument("--planning-prompt", type=Path, default=None, help="Path to planning system prompt")
     parser.add_argument("-w", "--workspace", type=Path, help="Working directory for repos")
-    parser.add_argument("--max-turns", type=int, default=24)
-    parser.add_argument("--followup-max-turns", type=int, default=24)
+    parser.add_argument("--max-turns", type=int, default=60)
+    parser.add_argument("--followup-max-turns", type=int, default=60)
     parser.add_argument("--repo-registry", type=Path)
     parser.add_argument("--review-model", default=None)
     parser.add_argument("--no-review-comment", action="store_true")
@@ -186,6 +192,10 @@ def main() -> None:
         print("GITHUB_TOKEN is required.", file=sys.stderr)
         sys.exit(1)
 
+    if not args.sprints_file and not get_k2_api_key():
+        print("K2_API_KEY or OPENAI_API_KEY is required for planning (use --sprints-file to skip).", file=sys.stderr)
+        sys.exit(1)
+
     # --- Resolve sprints ---
     if args.sprints_file:
         sprints = json.loads(args.sprints_file.read_text(encoding="utf-8"))
@@ -199,8 +209,12 @@ def main() -> None:
             print("Provide an idea as an argument, --idea-file, or --sprints-file.", file=sys.stderr)
             sys.exit(2)
 
-        print("--- Planning ---", file=sys.stderr)
-        sprints = run_planning_agent(idea, model=args.model, planning_prompt_path=args.planning_prompt)
+        print("--- Planning (K2) ---", file=sys.stderr)
+        sprints = run_planning_agent(
+            idea,
+            k2_model=args.planning_model,
+            planning_prompt_path=args.planning_prompt,
+        )
         print(f"\nPlanned {len(sprints)} sprint(s).", file=sys.stderr)
 
     if args.only_sprint is not None:

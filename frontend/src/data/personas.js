@@ -19,9 +19,10 @@ export const ROLE_SHORT = {
   solutions_architect: 'SA',
 };
 
-/** Shown next to simulator role for the two real dev-sim agents. */
+/** Shown next to simulator role for the real dev-sim agents from ``GET /api/agents``. */
 export const AGENT_KIND_LABELS = {
   coding: 'Coding (Claude)',
+  coding_b: 'Coding (Claude) · pair',
   review: 'PR review (K2)',
 };
 

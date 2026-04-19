@@ -21,13 +21,15 @@ function instantiateAgent(p) {
   };
 }
 
-/** Replace roster with the two dev-sim agents from ``GET /api/agents`` (coding + review). */
+/** Replace roster with three dev-sim agents from ``GET /api/agents`` (coding, coding_b, review). */
 export function applyBackendTeam(payload) {
   const a1 = agentFromBackendPersona(payload.coding, 'coding');
-  const a2 = agentFromBackendPersona(payload.review, 'review');
-  state.team = [instantiateAgent(a1), instantiateAgent(a2)];
+  const a2 = agentFromBackendPersona(payload.coding_b, 'coding_b');
+  const a3 = agentFromBackendPersona(payload.review, 'review');
+  state.team = [instantiateAgent(a1), instantiateAgent(a2), instantiateAgent(a3)];
   state.backendPersonaPayload = {
     coding: clone(payload.coding),
+    coding_b: clone(payload.coding_b),
     review: clone(payload.review),
   };
   recomputeBurn();
@@ -47,7 +49,7 @@ export const state = {
     progress: {},   // ticketId -> 0..1
   },
   team: [],
-  /** Raw ``coding`` / ``review`` persona dicts from ``GET /api/agents`` for orchestrate. */
+  /** Raw ``coding`` / ``coding_b`` / ``review`` persona dicts from ``GET /api/agents`` (orchestrate uses coding + review). */
   backendPersonaPayload: null,
   candidatePool: [],
   prs: [], // {id, ticket, agentId, status: open|review|merged|failed, additions, deletions, comments[]}

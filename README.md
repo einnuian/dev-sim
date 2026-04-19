@@ -67,7 +67,7 @@ This serves **`POST /api/simulate`** and **`GET /api/company`** on **port 8000**
 
 ### CEO chat → real `dev_sim` agents (optional bridge)
 
-From team chat, **`python -m dev_sim_bridge`** (port **8765**) runs the same flow as **`dev-sim-run`**: **planning** (decompose the CEO prompt into ordered sprints), then for each sprint **Claude coding agent → K2 review → optional follow-up**. Vite proxies **`/api/orchestrate`** (and **`/api/health`**) to that bridge. Use the chat **Agents** button for a short reminder.
+From team chat, **`python -m dev_sim_bridge`** (port **8765**) runs the same flow as **`dev-sim-run`**: **K2 planning** (decompose the CEO prompt into ordered sprints), then for each sprint **Claude coding agent → K2 review → optional follow-up**. Vite proxies **`/api/orchestrate`** (and **`/api/health`**) to that bridge. Use the chat **Agents** button for a short reminder.
 
 ---
 

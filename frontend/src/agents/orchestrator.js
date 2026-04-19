@@ -62,6 +62,10 @@ function pickReviewAgent() {
   return state.team.find(a => !a.fired && a.agentKind === 'review');
 }
 
+function pickCodingPairAgent() {
+  return state.team.find(a => !a.fired && a.agentKind === 'coding_b');
+}
+
 // Sanitize the iframe content: drop scripts that escape origin.
 function sanitize(html) {
   return html.replace(/window\.parent[^;]*/g, '/* removed */')
@@ -163,12 +167,13 @@ export async function runProject(prompt) {
   pushTick('event', 'CEO', `requested project: "${prompt}"`);
 
   const coder = pickCodingAgent();
+  const coderPair = pickCodingPairAgent();
   const reviewer = pickReviewAgent();
   if (!coder || !reviewer) {
     toast('Load the dev-sim team (start the API / bridge so /api/agents succeeds).', 'bad');
     return;
   }
-  if (!state.backendPersonaPayload?.coding || !state.backendPersonaPayload?.review) {
+  if (!state.backendPersonaPayload?.coding || !state.backendPersonaPayload?.coding_b || !state.backendPersonaPayload?.review) {
     toast('Team personas are not loaded. Start ``python run_api.py`` and reload the page.', 'bad');
     return;
   }
@@ -194,8 +199,9 @@ export async function runProject(prompt) {
   if (rev.expectedOneTime > 0 || rev.expectedMonthly > 0) {
     emit(project, sm, `Economics: +$${rev.expectedOneTime.toLocaleString()} one-time at ship · +$${rev.expectedMonthly.toLocaleString()}/mo starting next ledger sprint.`);
   }
+  const pairLine = coderPair ? `, ${coderPair.displayName} pairing on implementation` : '';
   await say(sm, 'standup', { yesterday: 'planning', today: `kicking off ${projId}` },
-    `${projId} kicking off. ${coder.displayName} on code, ${tlead.displayName} on review.`);
+    `${projId} kicking off. ${coder.displayName} on lead code${pairLine}. ${tlead.displayName} on review.`);
   pushTick('event', sm.displayName, `assigned ${coder.displayName} to ${projId}`);
   await sleep(450);
 

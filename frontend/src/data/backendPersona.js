@@ -56,7 +56,7 @@ function buildBio(p) {
 
 /**
  * @param {object} persona - snake_case dict from ``GET /api/agents``
- * @param {'coding'|'review'} agentKind
+ * @param {'coding'|'coding_b'|'review'} agentKind
  */
 export function agentFromBackendPersona(persona, agentKind) {
   const role = persona.role;

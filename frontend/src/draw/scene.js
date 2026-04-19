@@ -22,10 +22,11 @@ export function spawnFx(kind, x, y) {
 }
 
 function deskFor(i) {
-  // Two desks: coding (left) and PR review (right), matching the live dev-sim pair
+  // Three desks: two coders (left / mid) and PR review (right), matching GET /api/agents roster order
   const positions = [
-    { x: 10, y: 7 },
-    { x: 22, y: 7 },
+    { x: 8, y: 7 },
+    { x: 15, y: 7 },
+    { x: 23, y: 7 },
   ];
   return positions[i] || positions[0];
 }
@@ -248,11 +249,6 @@ export function drawScene(ctx, viewport, dt) {
     ctx.fillStyle = p.kind === 'bad' ? '#ff6b81' : '#ffd166';
     ctx.fillRect(Math.round(p.x), Math.round(p.y), 3, 3);
   }
-
-  // floating room title
-  ctx.fillStyle = 'rgba(255,255,255,0.04)';
-  ctx.font = `${Math.max(14, tile * 1.5)}px JetBrains Mono`;
-  ctx.fillText('FLOOR 7  ·  ENGINEERING', ox + 12, oy + tile * (ROOM_H - 1) - 4);
 
   syncBubbles();
 }

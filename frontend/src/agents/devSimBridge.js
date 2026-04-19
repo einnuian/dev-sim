@@ -1,5 +1,5 @@
 /**
- * Calls the local dev_sim_bridge HTTP server: planning (``run_planning_agent``) then
+ * Calls the local dev_sim_bridge HTTP server: K2 planning (``run_planning_agent``) then
  * one coding → K2 → follow-up pass per planned sprint (same as ``dev-sim-run``).
  * Vite proxies ``/api`` → port 8765 in dev/preview.
  */

@@ -785,7 +785,7 @@ function renderCandidatePickerModal(root, firedId) {
   if (!pool.length) {
     body.innerHTML = `<p style="color:var(--ink-1);margin:0 0 16px">
       <b>${escapeHtml(fired.displayName)}</b> has left the company.
-      There is no candidate pool (the live team is exactly the two dev-sim agents). Run short-handed or reload after restoring the API roster.
+      There is no candidate pool (the live team is the three dev-sim agents from the API). Run short-handed or reload after restoring the API roster.
     </p>`;
     const skip = el('button', 'btn', 'Continue >');
     skip.addEventListener('click', () => {
@@ -1102,7 +1102,7 @@ function renderAgentsHelpModal(root) {
   body.innerHTML = `
     <p style="color:var(--ink-1);font-size:12px;margin-top:0;line-height:1.55">
       CEO prompts are sent to the <strong>dev_sim_bridge</strong> HTTP service, which runs
-      <code>dev-sim-run</code>-style flow: <strong>planning</strong> splits the CEO ask into sprints, then each sprint runs
+      <code>dev-sim-run</code>-style flow: <strong>K2 planning</strong> splits the CEO ask into sprints, then each sprint runs
       Claude coding → K2 PR review → optional follow-up.
       Ending a game sprint calls <code>POST /api/simulate</code> to sync cash, MRR, valuation, and tech debt with the Python ledger;
       on load the HUD uses <code>GET /api/economy</code>. CEO chat can include <b>expected one-time</b> and <b>expected monthly</b>
