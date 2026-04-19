@@ -794,8 +794,7 @@ function renderIntroModal(root) {
   const body = el('div', 'intro-card');
   body.innerHTML = `
     <h1>SIMIANS</h1>
-    <div class="sub">CEO MODE | ENTERTAINMENT + MEDIA TRACK</div>
-    <p style="color:var(--ink-1);max-width:520px;margin:0 auto;line-height:1.6">
+    <p style="color:var(--ink-1);max-width:520px;margin:20px auto 0;line-height:1.6">
       You are the CEO of a tiny software studio staffed by AI engineers.
       They have personalities, opinions, and a habit of opening pull requests
       at the worst possible moment. Ship products. Make money. Decide who stays.
