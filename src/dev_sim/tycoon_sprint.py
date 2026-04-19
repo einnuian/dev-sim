@@ -98,7 +98,10 @@ def run_mock_sprint(
     path = company_state_path()
     company = _load_company_or_fresh(path)
 
-    burn_rate = float(team_stats_sum) * 1000.0 + 2000.0 + float(company.active_mrr) * 0.10
+    opening_balance = float(company.balance)
+    raw_burn = float(team_stats_sum) * 1000.0 + 2000.0 + float(company.active_mrr) * 0.10
+    # Demo-friendly runway: operating burn is scaled down (CEO upgrades are one-time; this is recurring burn).
+    burn_rate = raw_burn * 0.52
 
     mock_scores = _mock_technical_scores()
     impacts: dict[str, Any] = company.evaluate_project(expected_mrr, mock_scores)
@@ -108,7 +111,7 @@ def run_mock_sprint(
     company.hype_multiplier = float(impacts.get("next_hype_multiplier", company.hype_multiplier))
 
     actual_mrr = float(impacts.get("actual_mrr", 0.0))
-    status: SettlementStatus = company.process_sprint_settlement(burn_rate, actual_mrr)
+    status, ledger_lines = company.process_sprint_settlement(burn_rate, actual_mrr)
 
     company.save_state(path)
 
@@ -119,6 +122,8 @@ def run_mock_sprint(
         "tech_debt_delta": tech_delta,
         "actual_mrr": actual_mrr,
         "balance": float(company.balance),
+        "opening_balance": opening_balance,
+        "closing_balance": float(company.balance),
         "valuation": float(company.valuation),
         "tech_debt": float(company.tech_debt),
         "hype_multiplier": float(company.hype_multiplier),
@@ -127,6 +132,7 @@ def run_mock_sprint(
         "burn_rate": burn_rate,
         "sprint_month": int(company.sprint_month),
         "status": status,
+        "ledger_lines": ledger_lines,
     }
 
 

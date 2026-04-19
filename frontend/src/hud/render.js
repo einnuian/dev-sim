@@ -36,6 +36,24 @@ function fmtMoney(n) {
   return '$' + x.toLocaleString();
 }
 
+/** Signed cash / MRR line for sprint ledger strip (+ inflow, − outflow). */
+function fmtLedgerAmt(amount, kind) {
+  const k = String(kind || '');
+  if (k === 'mrr') return `+${fmtMoney(amount)}/mo book`;
+  const n = Math.round(safeNum(amount, 0));
+  if (n >= 0) return `+ ${fmtMoney(n)}`;
+  return `− ${fmtMoney(Math.abs(n))}`;
+}
+
+function ledgerLineClass(kind) {
+  const k = String(kind || '');
+  if (k === 'credit') return 'credit';
+  if (k === 'debit') return 'debit';
+  if (k === 'mrr') return 'mrr';
+  if (k === 'net') return 'net';
+  return '';
+}
+
 function cssVarColor(name, fallback) {
   const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
   const v = (raw && raw.trim()) || '';
@@ -168,6 +186,8 @@ function renderTopBar() {
     state.sprint.phase === 'execution' ? 'End Sprint >' :
     'Next Sprint >';
 
+  renderSprintLedgerStrip();
+
   const topbar = qs('#topbar');
   if (topbar) {
     topbar.classList.toggle('hud-sprint-live', state.sprint.phase === 'execution');
@@ -175,6 +195,33 @@ function renderTopBar() {
     const h = Math.ceil(topbar.getBoundingClientRect().height);
     document.documentElement.style.setProperty('--hud-topbar-height', `${h}px`);
   }
+}
+
+function renderSprintLedgerStrip() {
+  const root = qs('#sprint-ledger-strip');
+  if (!root) return;
+  const L = state.economy.lastSprintLedger;
+  if (!L || !L.lines || !L.lines.length) {
+    root.className = 'sprint-ledger-strip ledger-empty';
+    root.innerHTML =
+      '<span class="ledger-head">Sprint statement</span> End a sprint to see cash in (+) and burn out (−). CEO upgrades are one-time, not charged again each sprint.';
+    return;
+  }
+  root.className = 'sprint-ledger-strip';
+  const mo = typeof L.sprintMonth === 'number' ? L.sprintMonth : state.economy.sprintMonth;
+  const open = L.opening != null ? fmtMoney(L.opening) : '—';
+  const close = L.closing != null ? fmtMoney(L.closing) : '—';
+  const head = el('div', 'ledger-head', `Sprint ledger · mo. ${mo} · opening ${open} → closing ${close}`);
+  const rows = el('div', 'ledger-rows');
+  for (const line of L.lines) {
+    const row = el('div', `ledger-line ${ledgerLineClass(line.kind)}`);
+    row.appendChild(el('span', 'lbl', line.label));
+    row.appendChild(el('span', 'amt', fmtLedgerAmt(line.amount, line.kind)));
+    rows.appendChild(row);
+  }
+  root.innerHTML = '';
+  root.appendChild(head);
+  root.appendChild(rows);
 }
 
 // ---------- roster ----------
@@ -341,7 +388,8 @@ function renderLevers() {
       state.economy.cash -= lv.cost;
       lv.apply(state);
       pushTick('event', 'CEO', `purchased: ${lv.name}.`);
-      toast(`${lv.name}: ${lv.blurb}`, 'good');
+      const once = lv.cost > 0 ? ' One-time purchase — not billed again next sprint.' : '';
+      toast(`${lv.name}: ${lv.blurb}${once}`, 'good');
     });
     root.appendChild(b);
   }

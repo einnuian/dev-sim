@@ -99,7 +99,7 @@ class CompanyState:
             settlement (game-month), then is folded into ``active_mrr``.
     """
 
-    balance: float = 100_000.0
+    balance: float = 200_000.0
     active_mrr: float = 0.0
     tech_debt: float = 0.0
     hype_multiplier: float = 1.0
@@ -179,7 +179,7 @@ class CompanyState:
         self,
         burn_rate: float,
         newly_added_mrr: float,
-    ) -> SettlementStatus:
+    ) -> tuple[SettlementStatus, list[dict[str, Any]]]:
         """Apply one sprint of MRR, revenue, burn, outage risk, and valuation.
 
         Steps:
@@ -193,36 +193,90 @@ class CompanyState:
         7. Increment ``sprint_month``.
 
         Returns:
-            ``SERIES_A`` if paper valuation reaches $2M+, ``BANKRUPT`` if cash is depleted,
+            A tuple of ``(status, ledger_lines)`` where ``status`` is ``SERIES_A`` if paper
+            valuation reaches $2M+, ``BANKRUPT`` if cash is depleted,
             ``OUTAGE_SURVIVED`` if an outage fired this sprint (and not bankrupt),
-            otherwise ``CONTINUE``.
+            otherwise ``CONTINUE``. ``ledger_lines`` is a list of dicts with
+            ``label``, ``amount`` (signed where negative is cash out), and ``kind``.
         """
+        ledger: list[dict[str, Any]] = []
+        opening = float(self.balance)
+
         pipe = max(0.0, float(self.pending_recurring_mrr))
+        if pipe > 0:
+            ledger.append(
+                {
+                    "label": "Pipeline MRR now live (from shipped products)",
+                    "amount": float(pipe),
+                    "kind": "mrr",
+                }
+            )
         self.active_mrr += pipe
         self.pending_recurring_mrr = 0.0
 
-        self.active_mrr += float(newly_added_mrr)
+        add_mrr = float(newly_added_mrr)
+        if add_mrr > 0:
+            ledger.append(
+                {
+                    "label": "This sprint’s product uplift → MRR",
+                    "amount": add_mrr,
+                    "kind": "mrr",
+                }
+            )
+        self.active_mrr += add_mrr
         revenue = float(self.active_mrr) * float(self.hype_multiplier)
+        ledger.append(
+            {
+                "label": "Recurring revenue (MRR × hype)",
+                "amount": revenue,
+                "kind": "credit",
+            }
+        )
+
+        br = float(burn_rate)
+        ledger.append(
+            {
+                "label": "Operating burn (payroll + infra, this period)",
+                "amount": -br,
+                "kind": "debit",
+            }
+        )
 
         outage = False
         if self.tech_debt >= 100.0:
+            ledger.append(
+                {
+                    "label": "SLA / outage penalty (tech debt ≥ 100)",
+                    "amount": -25_000.0,
+                    "kind": "debit",
+                }
+            )
             self.balance -= 25_000.0
             self.tech_debt = 50.0
             outage = True
 
-        self.balance -= float(burn_rate)
+        self.balance -= br
         self.balance += revenue
+
+        net_cashflow = float(self.balance) - opening
+        ledger.append(
+            {
+                "label": "Net change to cash",
+                "amount": net_cashflow,
+                "kind": "net",
+            }
+        )
 
         self.valuation = float(self.active_mrr) * 12.0 * 10.0
         self.sprint_month += 1
 
         if self.valuation >= 2_000_000.0:
-            return "SERIES_A"
+            return "SERIES_A", ledger
         if self.balance <= 0.0:
-            return "BANKRUPT"
+            return "BANKRUPT", ledger
         if outage:
-            return "OUTAGE_SURVIVED"
-        return "CONTINUE"
+            return "OUTAGE_SURVIVED", ledger
+        return "CONTINUE", ledger
 
     def save_state(self, filepath: str | Path) -> None:
         """Persist state as JSON (UTF-8)."""

@@ -2,7 +2,7 @@
 :root {
   color-scheme: dark;
   /* Set from JS after layout so side panels + canvas clear the real header height */
-  --hud-topbar-height: 120px;
+  --hud-topbar-height: 148px;
   --bg-0: #07090f;
   --bg-1: #0c111c;
   --bg-2: #131a2a;
@@ -62,10 +62,10 @@ canvas#stage {
   min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-rows: auto auto;
+  grid-template-rows: auto auto auto;
   gap: 8px 12px;
   align-items: center;
-  padding: 10px 14px 12px;
+  padding: max(10px, env(safe-area-inset-top, 0px)) 14px 12px;
   background: linear-gradient(180deg, rgba(7,9,15,0.96), rgba(7,9,15,0.78));
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(8px);
@@ -109,20 +109,85 @@ canvas#stage {
   grid-column: 1 / -1;
   grid-row: 2;
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  gap: 8px;
   width: 100%;
   min-width: 0;
+  max-width: 1120px;
+  margin: 0 auto;
+  align-self: stretch;
+}
+@media (max-width: 960px) {
+  .stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 .stat {
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 5px 6px;
+  padding: 6px 8px;
   min-width: 0;
-  min-height: 52px;
+  min-height: 56px;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 2px;
   transition: transform .12s, border-color .2s, box-shadow .2s;
+}
+.sprint-ledger-strip {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  width: 100%;
+  max-width: 100%;
+  min-height: 28px;
+  padding: 6px 10px 4px;
+  margin: 0 -2px;
+  border-radius: 8px;
+  border: 1px solid var(--line);
+  background: rgba(10, 14, 24, 0.85);
+  font-size: 10px;
+  color: var(--ink-1);
+  line-height: 1.35;
+}
+.sprint-ledger-strip .ledger-head {
+  font-size: 9px;
+  letter-spacing: 0.6px;
+  text-transform: uppercase;
+  color: var(--accent-2);
+  margin-bottom: 4px;
+  font-weight: 700;
+}
+.sprint-ledger-strip .ledger-rows {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  align-items: baseline;
+  font-variant-numeric: tabular-nums;
+}
+.sprint-ledger-strip .ledger-line {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+  white-space: nowrap;
+}
+.sprint-ledger-strip .ledger-line .lbl { color: var(--ink-2); max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.sprint-ledger-strip .ledger-line .amt { font-weight: 700; }
+.sprint-ledger-strip .ledger-line.credit .amt { color: var(--good); }
+.sprint-ledger-strip .ledger-line.debit .amt { color: #ff8a7a; }
+.sprint-ledger-strip .ledger-line.mrr .amt { color: var(--accent); }
+.sprint-ledger-strip .ledger-line.net .amt { color: var(--ink-0); }
+.sprint-ledger-strip.ledger-empty {
+  border-style: dashed;
+  color: var(--ink-2);
+  font-style: italic;
 }
 .stat:hover { transform: translateY(-1px); border-color: var(--accent-2); }
 .stat-label { font-size: 8px; color: var(--ink-2); letter-spacing: 0.9px; line-height: 1.2; }
@@ -664,7 +729,7 @@ body.td-crisis {
 #chatdock {
   position: fixed;
   left: 12px;
-  bottom: 96px;
+  bottom: calc(88px + 14px);
   width: 360px;
   max-height: 280px;
   display: none;
@@ -747,7 +812,7 @@ body.td-crisis {
 #chat-toggle {
   position: fixed;
   left: 12px;
-  bottom: 96px;
+  bottom: calc(88px + 14px);
   z-index: 11;
   background: linear-gradient(180deg, var(--accent-2), #4fb8e0);
   color: #021419;
