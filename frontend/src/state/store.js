@@ -71,6 +71,7 @@ export function resetGameState() {
   state.toasts = [];
   state.modal = null;
   state.ui.orchestrateBusy = false;
+  state.ui.sprintDrivenByOrchestrate = false;
   state.ui.matrixLines = [];
   state.ui.sprintHeat = 0;
   Object.assign(state.economy, {
@@ -134,6 +135,8 @@ export const state = {
   modal: null, // {kind, payload}
   ui: {
     orchestrateBusy: false,
+    /** When true, sprint ``execution`` tracks CEO dev-sim build (no wall-clock auto-end / fake ticket PRs). */
+    sprintDrivenByOrchestrate: false,
     /** @type {string[]} */
     matrixLines: [],
     /** Mean ticket progress 0–1 during execution (drives HUD / board “heat”). */

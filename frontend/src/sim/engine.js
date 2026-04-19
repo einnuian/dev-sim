@@ -66,6 +66,8 @@ function velocityFor(agent) {
 let standupTimer = 0;
 let chatterTimer = 0;
 let eventTimer = 0;
+/** Phase accumulator for synthetic sprint heat while CEO orchestrate drives execution. */
+let _orchDrivePhase = 0;
 
 export function tick(dt) {
   if (state.paused) return;
@@ -287,12 +289,38 @@ function checkAchievements() {
 // --- sprint phase transitions ---
 
 export function startSprint() {
+  state.ui.sprintDrivenByOrchestrate = false;
   state.sprint.phase = 'execution';
   state.sprint.elapsed = 0;
   recomputeBurn();
   for (const a of state.team) if (!a.fired) a.sprintsServed++;
   pushTick('event', 'CEO', `Sprint ${state.sprint.number} STARTED. Burn $${state.economy.burnRate.toLocaleString()}/sprint.`);
   /* pushTick already notify()s — immediate HUD refresh for sprint start */
+}
+
+/** Enter ``execution`` for the duration of ``POST /api/orchestrate`` (no fake ticket PRs / no wall-clock sprint end). */
+export function beginOrchestrateSprint() {
+  state.ui.sprintDrivenByOrchestrate = true;
+  _orchDrivePhase = 0;
+  state.sprint.phase = 'execution';
+  state.sprint.elapsed = 0;
+  recomputeBurn();
+  pushTick('event', 'Bridge', `Sprint ${state.sprint.number} · execution linked to dev-sim build.`);
+  notify();
+}
+
+/** Leave orchestrate-driven execution (returns to planning; does not run HR / tycoon — use End Sprint for that). */
+export function endOrchestrateSprint() {
+  if (!state.ui.sprintDrivenByOrchestrate) return;
+  state.ui.sprintDrivenByOrchestrate = false;
+  _orchDrivePhase = 0;
+  state.ui.sprintHeat = 0;
+  if (state.sprint.phase === 'execution') {
+    state.sprint.phase = 'planning';
+    state.sprint.elapsed = 0;
+    pushTick('event', 'Bridge', `dev-sim build finished — sprint idle (planning).`);
+  }
+  notify();
 }
 
 function sprintSpecText() {

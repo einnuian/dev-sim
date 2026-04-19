@@ -460,7 +460,11 @@ def _project_label(prompt: str) -> str:
 
 
 def _serialize_run(r: dict[str, Any]) -> dict[str, Any]:
-    return {"stop": r.get("stop"), "last_pr": _serialize_pr(r.get("last_pr"))}
+    out: dict[str, Any] = {"stop": r.get("stop"), "last_pr": _serialize_pr(r.get("last_pr"))}
+    at = r.get("assistant_text")
+    if isinstance(at, str) and at.strip():
+        out["assistant_text"] = at.strip()
+    return out
 
 
 def _serialize_pr(last_pr: Any) -> dict[str, Any] | None:

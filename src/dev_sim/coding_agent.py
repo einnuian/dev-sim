@@ -991,6 +991,26 @@ def _block_type(block: Any) -> str:
     return getattr(block, "type", None) or (block.get("type") if isinstance(block, dict) else "")
 
 
+_ASSISTANT_TEXT_CAP = 50_000
+
+
+def _assistant_text_from_content(content: Any) -> str:
+    """Join assistant text blocks from a Messages API ``content`` list (SDK objects or dicts)."""
+    parts: list[str] = []
+    for block in content or []:
+        if _block_type(block) != "text":
+            continue
+        t = getattr(block, "text", None)
+        if t is None and isinstance(block, dict):
+            t = block.get("text")
+        if t and str(t).strip():
+            parts.append(str(t).strip())
+    out = "\n\n".join(parts).strip()
+    if len(out) > _ASSISTANT_TEXT_CAP:
+        return out[:_ASSISTANT_TEXT_CAP] + "\n…[truncated]"
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Agent loop — Anthropic Messages API with tool_use / tool_result turns
 # ---------------------------------------------------------------------------
@@ -1037,6 +1057,7 @@ def run_coding_agent(
         progress_cm = nullcontext()
 
     with progress_cm as announcer:
+        message: Any = None
         for _ in range(max_turns):
             if announcer is not None:
                 announcer.set_phase("awaiting_model")
@@ -1050,27 +1071,27 @@ def run_coding_agent(
 
             # Normal completion: print assistant text and exit the loop.
             if message.stop_reason == "end_turn":
-                for block in message.content:
-                    if _block_type(block) == "text":
-                        t = getattr(block, "text", None)
-                        if t is None and isinstance(block, dict):
-                            t = block.get("text")
-                        if t:
-                            print(t)
-                return {"last_pr": last_pr, "stop": "end_turn"}
+                assistant_text = _assistant_text_from_content(message.content)
+                if assistant_text:
+                    print(assistant_text)
+                return {
+                    "last_pr": last_pr,
+                    "stop": "end_turn",
+                    "assistant_text": assistant_text,
+                }
 
             # e.g. max_tokens, refusal — print any text then stop (no tool_results to send).
             if message.stop_reason != "tool_use":
-                for block in message.content:
-                    if _block_type(block) == "text":
-                        t = getattr(block, "text", None)
-                        if t is None and isinstance(block, dict):
-                            t = block.get("text")
-                        if t:
-                            print(t)
+                assistant_text = _assistant_text_from_content(message.content)
+                if assistant_text:
+                    print(assistant_text)
                 if message.stop_reason:
                     print(f"(stop_reason: {message.stop_reason})", file=sys.stderr)
-                return {"last_pr": last_pr, "stop": str(message.stop_reason)}
+                return {
+                    "last_pr": last_pr,
+                    "stop": str(message.stop_reason),
+                    "assistant_text": assistant_text,
+                }
 
             # Assistant asked for one or more tools: run them and send results in a single user message.
             if announcer is not None:
@@ -1118,4 +1139,5 @@ def run_coding_agent(
             messages.append({"role": "user", "content": tool_results})
 
         print(f"Stopped after {max_turns} turns (max_turns limit).", file=sys.stderr)
-        return {"last_pr": last_pr, "stop": "max_turns"}
+        tail = _assistant_text_from_content(message.content) if message is not None else ""
+        return {"last_pr": last_pr, "stop": "max_turns", "assistant_text": tail}

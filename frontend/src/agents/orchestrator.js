@@ -19,7 +19,7 @@ import {
   applyPlanningSprintsToBacklog,
   pushPlanningFeedFromText,
 } from '../state/store.js';
-import { planSprint } from '../sim/engine.js';
+import { planSprint, beginOrchestrateSprint, endOrchestrateSprint } from '../sim/engine.js';
 import { averageTechnicalScores, TYCOON_TECH_KEYS } from '../data/tycoonRubric.js';
 import { ROLE_LABELS } from '../data/personas.js';
 import { pickTemplate, buildReadme, describeTemplate } from './templates.js';
@@ -45,6 +45,32 @@ const MATRIX_SNIPS = [
   'export async function runDevSimOrchestrate(prompt) {',
   '[K2] verdict: approve | technical_scores: 10 keys present',
 ];
+
+/** Collapse whitespace and cap length so team chat quotes the real CEO message, not boilerplate. */
+function ceoPromptSnippet(text, maxLen = 220) {
+  const t = String(text ?? '').replace(/\s+/g, ' ').trim();
+  if (!t) return '(empty message)';
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, Math.max(1, maxLen - 1))}…`;
+}
+
+/** Small talk / greetings — not a product build request (used to keep team chat minimal). */
+function isConversationalCeoPrompt(text) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return false;
+  const t = raw.toLowerCase();
+  if (raw.length > 320) return false;
+  const buildy =
+    /\b(make|build|create|implement|ship|pull\s*request|\bpr\b|feature|bug|fix\s+the|add\s+a\s+repo|commit|deploy|refactor|github|clone|patch|sprint|ticket|jira|endpoint|schema|migrate)\b/i.test(
+      t,
+    );
+  if (buildy) return false;
+  if (/^(hi|hello|hey|yo|hiya|howdy|good\s+(morning|afternoon|evening)|greetings)\b/i.test(t)) return true;
+  if (/^(thanks|thank\s+you|thx|cheers)\b/i.test(t)) return true;
+  if (/^(ok|okay|bye|goodbye|see\s+you)\b/i.test(t) && raw.length < 80) return true;
+  if (raw.length < 56 && !/\n/.test(raw)) return true;
+  return false;
+}
 
 let matrixIntervalId = null;
 
@@ -179,7 +205,12 @@ function setTyping(agent) {
 // Main entry point: handle a CEO prompt.
 export async function runProject(prompt) {
   const projId = `PRJ-${projectCounter++}`;
-  pushTick('event', 'CEO', `requested project: "${prompt}"`);
+  const snippet = ceoPromptSnippet(prompt, 240);
+  const snippetBubble = ceoPromptSnippet(prompt, 96);
+  const conversational = isConversationalCeoPrompt(prompt);
+  if (!conversational) {
+    pushTick('event', 'CEO', `${projId}: "${snippet}"`);
+  }
 
   const coder = pickCodingAgent();
   const coderPair = pickCodingPairAgent();
@@ -210,15 +241,17 @@ export async function runProject(prompt) {
   if (state.projects.length > 12) state.projects.pop();
   notify();
 
-  emit(project, sm, `Got it. Spinning up ${projId}: "${prompt}"`);
-  if (rev.expectedOneTime > 0 || rev.expectedMonthly > 0) {
-    emit(project, sm, `Economics: +$${rev.expectedOneTime.toLocaleString()} one-time at ship · +$${rev.expectedMonthly.toLocaleString()}/mo starting next ledger sprint.`);
+  if (!conversational) {
+    emit(project, sm, `Acknowledged — ${projId}. Your message: "${snippet}"`);
+    if (rev.expectedOneTime > 0 || rev.expectedMonthly > 0) {
+      emit(project, sm, `Economics: +$${rev.expectedOneTime.toLocaleString()} one-time at ship · +$${rev.expectedMonthly.toLocaleString()}/mo starting next ledger sprint.`);
+    }
+    const pairLine = coderPair ? `, ${coderPair.displayName} pairing on implementation` : '';
+    await say(sm, 'standup', { yesterday: 'triage', today: projId },
+      `${projId} for "${snippetBubble}" — ${coder.displayName} on lead code${pairLine}, ${tlead.displayName} on review.`);
+    pushTick('event', sm.displayName, `assigned ${coder.displayName} to ${projId}`);
+    await sleep(450);
   }
-  const pairLine = coderPair ? `, ${coderPair.displayName} pairing on implementation` : '';
-  await say(sm, 'standup', { yesterday: 'planning', today: `kicking off ${projId}` },
-    `${projId} kicking off. ${coder.displayName} on lead code${pairLine}. ${tlead.displayName} on review.`);
-  pushTick('event', sm.displayName, `assigned ${coder.displayName} to ${projId}`);
-  await sleep(450);
 
   const tplKey = pickTemplate(prompt);
   const tplDesc = describeTemplate(tplKey);
@@ -226,12 +259,15 @@ export async function runProject(prompt) {
   // 2–3. Server-side dev_sim: Claude coding agent → K2 PR review → optional follow-up
   project.phase = 'coding';
   notify();
-  setTyping(coder);
-  emit(project, coder, `Handing this to the **dev-sim** coding agent (Claude) on the workstation…`);
-  await say(coder, 'standup', { yesterday: 'reviewing the brief', today: 'running dev-sim-run pipeline' },
-    `Planning sprints, then full repo + PR pipeline per sprint. This can take a long time.`);
+  if (!conversational) {
+    setTyping(coder);
+    emit(project, coder, `Running dev-sim for your ask: "${snippet}"`);
+    await say(coder, 'standup', { yesterday: 'CEO message', today: 'dev-sim bridge' },
+      `Plan → coding agent → PR review for "${snippetBubble}" (may take a while).`);
+  }
 
   let api;
+  beginOrchestrateSprint();
   startMatrixStream();
   try {
     const orch = state.ui.orchestrateOptions || {};
@@ -251,13 +287,27 @@ export async function runProject(prompt) {
     return;
   } finally {
     stopMatrixStream();
+    endOrchestrateSprint();
   }
 
   if (!api.ok) {
     project.phase = 'done';
     project.error = api.error || 'Unknown error';
-    emit(project, sm, `dev-sim reported failure: ${project.error}`);
-    toast(project.error, 'bad');
+    coder.activity = 'idle';
+    coder.activityTtl = 0;
+    const assistantReply = pickAssistantReplyFromOrchestrate(api);
+    if (assistantReply) {
+      emit(project, coder, assistantReply);
+      if (conversational) {
+        project.error = null;
+      } else {
+        emit(project, sm, `${project.error} (See coding agent reply above.)`);
+        toast('Coding agent replied — no shipped build this run.', 'good');
+      }
+    } else {
+      emit(project, sm, `dev-sim reported failure: ${project.error}`);
+      toast(project.error, 'bad');
+    }
     notify();
     return;
   }
@@ -503,6 +553,28 @@ function guessName(prompt, fallback) {
 }
 
 let _emitNotifyRaf = 0;
+
+/** Last coding-agent plain-text reply from ``/api/orchestrate`` when no PR shipped (e.g. ``stop: end_turn``). */
+function pickAssistantReplyFromOrchestrate(api) {
+  if (!api || typeof api !== 'object') return '';
+  /** @param {unknown} o */
+  const fromPass = (o) => {
+    if (!o || typeof o !== 'object') return '';
+    const raw =
+      /** @type {{ assistant_text?: string; assistantText?: string }} */ (o).assistant_text ??
+      /** @type {{ assistant_text?: string; assistantText?: string }} */ (o).assistantText;
+    return typeof raw === 'string' && raw.trim() ? raw.trim() : '';
+  };
+  const top = fromPass(api.codingPass1);
+  if (top) return top;
+  const sr = api.sprintResults;
+  if (!Array.isArray(sr)) return '';
+  for (let i = sr.length - 1; i >= 0; i -= 1) {
+    const t = fromPass(sr[i]?.codingPass1);
+    if (t) return t;
+  }
+  return '';
+}
 
 function emit(project, agent, text) {
   project.log.push({ who: agent.displayName, role: agent.role, text, ts: Date.now() });

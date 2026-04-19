@@ -44,6 +44,10 @@ export async function runDevSimOrchestrate(prompt, opts = {}) {
     /* ignore */
   }
   if (!res.ok) {
+    // Bridge uses HTTP 422 (and 429) with JSON where ``ok: false`` but ``codingPass1`` / etc. are still present.
+    if (data && typeof data === 'object' && data.ok === false) {
+      return data;
+    }
     const msg = data.error || res.statusText || `HTTP ${res.status}`;
     throw new Error(msg);
   }

@@ -1,9 +1,9 @@
 {
-  "balance": 168914.08000000002,
-  "active_mrr": 7387.2,
-  "tech_debt": 0.0,
+  "balance": 331270.4384612743,
+  "active_mrr": 104006.79913462042,
+  "tech_debt": 60.0,
   "hype_multiplier": 1.0,
-  "sprint_month": 3,
-  "valuation": 886464.0,
+  "sprint_month": 9,
+  "valuation": 12480815.896154452,
   "pending_recurring_mrr": 0.0
 }

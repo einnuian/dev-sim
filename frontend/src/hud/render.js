@@ -183,7 +183,14 @@ function renderTopBar() {
   const sm = typeof e.sprintMonth === 'number' && e.sprintMonth >= 1 ? e.sprintMonth : state.sprint.number;
   const pipe = safeNum(e.pendingRecurringMrr, 0);
   const pipeHint = pipe > 0.5 ? ` · +$${Math.round(pipe).toLocaleString()}/mo → ledger next sprint` : '';
-  const tagline = `Ledger mo. ${sm} | Sprint ${state.sprint.number} | ${capitalize(state.sprint.phase)}${state.sprint.phase === 'execution' ? ' | ' + Math.max(0, Math.ceil(state.sprint.duration - state.sprint.elapsed)) + 's left' : ''}${pipeHint}`;
+  const orchDrive = !!state.ui.sprintDrivenByOrchestrate;
+  const execHint =
+    state.sprint.phase === 'execution'
+      ? orchDrive
+        ? ' | dev-sim build…'
+        : ` | ${Math.max(0, Math.ceil(state.sprint.duration - state.sprint.elapsed))}s left`
+      : '';
+  const tagline = `Ledger mo. ${sm} | Sprint ${state.sprint.number} | ${capitalize(state.sprint.phase)}${execHint}${pipeHint}`;
   const tagEl = document.getElementById('tagline');
   if (tagEl && tagEl.textContent !== tagline) tagEl.textContent = tagline;
   const burnShown = e.lastSettlementBurn != null ? e.lastSettlementBurn : e.burnRate;
@@ -215,10 +222,12 @@ function renderTopBar() {
 
   qs('#btn-pause').textContent = state.paused ? '> Resume' : '|| Pause';
   qs('#btn-speed').textContent = `>> ${state.speed}x`;
-  qs('#btn-end-sprint').textContent =
+  const endSprintBtn = qs('#btn-end-sprint');
+  endSprintBtn.textContent =
     state.sprint.phase === 'planning' ? 'Start Sprint >' :
     state.sprint.phase === 'execution' ? 'End Sprint >' :
     'Next Sprint >';
+  endSprintBtn.disabled = !!state.ui.sprintDrivenByOrchestrate;
 
   renderSprintLedgerStrip();
 
@@ -456,8 +465,37 @@ function renderTicker() {
 }
 
 // ---------- sprint board ----------
+/** When only ``matrixLines`` change during orchestrate, patch the overlay instead of wiping the board (less flicker). */
+
 function renderBoard() {
   const root = qs('#board');
+  const structureSig = [
+    state.sprint.phase,
+    String(Math.round(Math.min(1, Math.max(0, state.ui?.sprintHeat || 0)) * 100)),
+    String(!!state.ui?.orchestrateBusy),
+    (state.sprint.backlog || []).map((t) => `${t.id}:${t.title}`).join('|'),
+    JSON.stringify(state.sprint.progress || {}),
+    JSON.stringify(state.sprint.assignments || {}),
+  ].join('\n');
+
+  const matrixText = (state.ui.matrixLines || []).slice(-36).join('\n');
+  if (
+    state.ui?.orchestrateBusy &&
+    root?.dataset?.boardStructSig === structureSig &&
+    root.querySelector('.matrix-board-overlay')
+  ) {
+    const pre = root.querySelector('.matrix-board-overlay .matrix-stream');
+    if (pre && root.dataset.matrixStreamSig !== matrixText) {
+      pre.textContent = matrixText;
+      root.dataset.matrixStreamSig = matrixText;
+    }
+    return;
+  }
+
+  if (root) {
+    root.dataset.boardStructSig = structureSig;
+    root.dataset.matrixStreamSig = matrixText;
+  }
   root.innerHTML = '';
   if (state.sprint.phase === 'execution') {
     const heat = Math.round(Math.min(1, Math.max(0, state.ui.sprintHeat || 0)) * 100);
@@ -624,10 +662,64 @@ function renderToasts() {
 }
 
 // ---------- modals ----------
+/** Last ``modalRenderSignature()`` — skip DOM wipe/rebuild when unchanged (stops intro blink on every ``notify``). */
+let _modalRenderSig = '';
+
+function modalRenderSignature() {
+  if (!state.modal) return '';
+  const { kind, payload } = state.modal;
+  try {
+    switch (kind) {
+      case 'intro':
+      case 'agents-help':
+      case 'newspaper':
+      case 'game-over':
+        return kind;
+      case 'agent-card':
+        return `agent-card:${payload?.agentId ?? ''}`;
+      case 'candidate-picker':
+        return `candidate-picker:${payload?.firedId ?? ''}`;
+      case 'hr-review':
+        return `hr-review:${JSON.stringify(payload?.scores ?? {})}`;
+      case 'project': {
+        const id = payload?.projectId;
+        const proj = (state.projects || []).find((x) => x.id === id);
+        if (!proj) return `project:${id}:missing`;
+        return [
+          'project',
+          id,
+          proj.phase ?? '',
+          proj.prId ?? '',
+          String(proj.error ?? '').slice(0, 160),
+          proj.review?.score ?? '',
+          (proj.html || '').length,
+          (proj.readme || '').length,
+        ].join('\t');
+      }
+      case 'k2-audit':
+        return `k2-audit:${JSON.stringify(payload ?? null)}`;
+      default:
+        return `${kind}:${JSON.stringify(payload ?? null)}`;
+    }
+  } catch {
+    return `${kind}:invalid`;
+  }
+}
+
 function renderModal() {
   const root = qs('#modal-root');
+  if (!state.modal) {
+    root.innerHTML = '';
+    root.classList.remove('open');
+    _modalRenderSig = '';
+    return;
+  }
+  const sig = modalRenderSignature();
+  if (sig === _modalRenderSig && root.classList.contains('open') && root.querySelector('.modal')) {
+    return;
+  }
+  _modalRenderSig = sig;
   root.innerHTML = '';
-  if (!state.modal) { root.classList.remove('open'); return; }
   root.classList.add('open');
   switch (state.modal.kind) {
     case 'intro': renderIntroModal(root); break;
@@ -1468,6 +1560,7 @@ export function initHud() {
   });
   qs('#btn-end-sprint').addEventListener('click', () => {
     if (state.modal) return;
+    if (state.ui.sprintDrivenByOrchestrate) return;
     if (state.sprint.phase === 'planning') startSprint();
     else if (state.sprint.phase === 'execution') void endSprint().catch(() => {});
     else if (state.sprint.phase === 'review') advanceToNextSprint();
