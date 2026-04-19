@@ -806,7 +806,6 @@ function renderIntroModal(root) {
       <div><b>Real sprints</b> Stand-ups, PR reviews, retros, builds -- all play out on screen.</div>
       <div><b>Money loop</b> Salaries, MRR, contracts, raises, runway. Do not go broke.</div>
       <div><b>HR pressure</b> End-of-sprint scoreboard. Fire underperformers. Pick a contrasting replacement.</div>
-      <div><b>BYO LLM</b> Plug in OpenAI/Groq/OpenRouter for in-character agents and smarter code, or use the built-in template engine.</div>
     </div>
     <p style="color:var(--ink-2);font-size:11px">Tip: Click any agent (sprite or roster card) for their persona, meters, and action wheel.</p>
     <p style="color:var(--ink-2);font-size:11px;margin-top:8px">Close this dialog (X) to begin Sprint 1.</p>
