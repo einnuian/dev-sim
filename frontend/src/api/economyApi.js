@@ -1,6 +1,6 @@
 /**
- * FastAPI economy / settlement (`dev_sim.api`). Proxied in dev from Vite to port 8000.
- * @see run_api.py
+ * Company ledger for initial HUD hydrate. Proxied in dev to ``dev_sim_bridge`` (8765) or FastAPI (8000).
+ * @see run_api.py / dev_sim_bridge ``GET /api/company``
  */
 
 const PREFIX = (import.meta.env.VITE_FASTAPI_URL || '').replace(/\/$/, '');

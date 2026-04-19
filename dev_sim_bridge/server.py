@@ -5,32 +5,31 @@ from __future__ import annotations
 import json
 import os
 import sys
+from dataclasses import asdict
 from concurrent.futures import Future, ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
-from dev_sim.agents_payload import get_session_agents
-
 REPO_ROOT = Path(__file__).resolve().parent.parent
-
-from dotenv import load_dotenv
-
-# Bulletproof: load nested + root ``.env`` before ``sys.path`` / ``dev_sim`` (override empty shell vars).
-load_dotenv(REPO_ROOT / ".dev-sim" / ".env", override=True)
-load_dotenv(REPO_ROOT / ".env", override=True)
-
 SRC = REPO_ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
+from dotenv import load_dotenv
+
+# Bulletproof: load nested + root ``.env`` before ``dev_sim`` imports (override empty shell vars).
+load_dotenv(REPO_ROOT / ".dev-sim" / ".env", override=True)
+load_dotenv(REPO_ROOT / ".env", override=True)
+
+from dev_sim.agents_payload import get_session_agents
 from dev_sim.config import load_env
 
 load_env()
 
 _executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="dev_sim_bridge")
-_current: Future[Any] | None = None
+_current: Optional[Future[Any]] = None
 
 
 def _maybe_push_after_settlement(project_name: str) -> dict[str, Any]:
@@ -99,12 +98,15 @@ class BridgeHandler(BaseHTTPRequestHandler):
         if parsed.path == "/api/economy":
             self._handle_economy_get()
             return
+        if parsed.path == "/api/company":
+            self._handle_company_get()
+            return
         if parsed.path == "/api/agents":
             qs = parse_qs(parsed.query)
             raw = (qs.get("seed") or [None])[0]
             refresh_vals = qs.get("refresh") or []
             force_refresh = any(str(v).lower() in ("1", "true", "yes") for v in refresh_vals)
-            seed: int | None
+            seed: Optional[int]
             if raw is None or raw == "":
                 seed = None
             else:
@@ -150,6 +152,23 @@ class BridgeHandler(BaseHTTPRequestHandler):
             return
         data.setdefault("pending_recurring_mrr", 0.0)
         out = {"ok": True, "source": str(path), **data}
+        self._send(200, json.dumps(out).encode("utf-8"))
+
+    def _handle_company_get(self) -> None:
+        """GET /api/company — same shape as FastAPI (``CompanyState`` + ``persisted``) for ``main.js`` hydrate."""
+        path = REPO_ROOT / ".dev-sim" / "company-state.json"
+        persisted = path.is_file()
+        os.chdir(REPO_ROOT)
+        from dev_sim.economy import CompanyState
+
+        company = CompanyState()
+        if persisted:
+            try:
+                company = CompanyState.load_state(path)
+            except (json.JSONDecodeError, OSError, TypeError, ValueError):
+                persisted = False
+        out: dict[str, Any] = asdict(company)
+        out["persisted"] = persisted
         self._send(200, json.dumps(out).encode("utf-8"))
 
     def do_POST(self) -> None:
@@ -296,6 +315,7 @@ def main(host: str = "127.0.0.1", port: int = 8765) -> None:
     )
     print("  GET  /api/health", file=sys.stderr)
     print("  GET  /api/economy   (company-state.json for HUD sync)", file=sys.stderr)
+    print("  GET  /api/company   (CompanyState JSON + persisted, same as run_api.py)", file=sys.stderr)
     print("  GET  /api/agents  optional ?seed=int", file=sys.stderr)
     try:
         httpd.serve_forever()

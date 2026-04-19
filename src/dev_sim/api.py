@@ -9,7 +9,7 @@ import json
 import sys
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Optional
 
 _SRC_ROOT = Path(__file__).resolve().parents[1]
 _repo_s = str(Path(__file__).resolve().parents[2])
@@ -99,7 +99,7 @@ class SprintResponse(BaseModel):
 
 @app.get("/api/agents")
 def get_agents(
-    seed: int | None = Query(None, description="RNG seed used only on the first sample for this process."),
+    seed: Optional[int] = Query(None, description="RNG seed used only on the first sample for this process."),
     refresh: bool = Query(False, description="If true, discard cached personas and sample again."),
 ) -> dict[str, Any]:
     """Personas for the two dev-sim agents; sampled once per process then reused (unless ``refresh``)."""

@@ -34,8 +34,9 @@ async function hydrateAgentsFromServer() {
   try {
     const payload = await fetchDevTeamAgents();
     applyBackendTeam(payload);
-  } catch {
-    /* FastAPI / bridge not running — roster stays empty until reload */
+  } catch (e) {
+    /* Vite must proxy /api/agents to dev_sim_bridge (8765) or run FastAPI on 8000 */
+    console.warn('[dev-sim] Failed to load /api/agents — roster will stay empty until reload.', e);
   }
 }
 void hydrateAgentsFromServer();

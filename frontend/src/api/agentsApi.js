@@ -1,6 +1,7 @@
 /**
  * Load the two dev-sim agents (coding + review) from the backend.
- * Vite proxies ``/api/agents`` to FastAPI on port 8000 (``python run_api.py``). ``dev_sim_bridge`` (8765) serves the same route if you hit it directly.
+ * Vite proxies ``/api/agents`` to ``dev_sim_bridge`` on port 8765 (``python -m dev_sim_bridge``).
+ * Alternatively run ``python run_api.py`` on 8000 and point Vite at that port.
  */
 
 function unwrapAgentsPayload(data) {

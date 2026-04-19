@@ -9,7 +9,7 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      // CEO chat → dev_sim agents (optional bridge)
+      // Local dev: one process — ``python -m dev_sim_bridge`` on 8765 serves agents, economy, simulate, orchestrate.
       '/api/orchestrate': {
         target: 'http://127.0.0.1:8765',
         changeOrigin: true,
@@ -18,18 +18,20 @@ export default defineConfig({
         target: 'http://127.0.0.1:8765',
         changeOrigin: true,
       },
-      // Personas for the two agents (FastAPI — same process as economy, ``python run_api.py``)
       '/api/agents': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8765',
         changeOrigin: true,
       },
-      // Economy / tycoon ledger (FastAPI — python run_api.py)
       '/api/simulate': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8765',
         changeOrigin: true,
       },
       '/api/company': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8765',
+        changeOrigin: true,
+      },
+      '/api/economy': {
+        target: 'http://127.0.0.1:8765',
         changeOrigin: true,
       },
     },
@@ -45,15 +47,19 @@ export default defineConfig({
         changeOrigin: true,
       },
       '/api/agents': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8765',
         changeOrigin: true,
       },
       '/api/simulate': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8765',
         changeOrigin: true,
       },
       '/api/company': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8765',
+        changeOrigin: true,
+      },
+      '/api/economy': {
+        target: 'http://127.0.0.1:8765',
         changeOrigin: true,
       },
     },
