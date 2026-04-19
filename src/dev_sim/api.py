@@ -5,8 +5,11 @@ For day-to-day CEO UI, prefer ``python -m dev_sim_bridge`` on port 8765 (``POST 
 
 from __future__ import annotations
 
+import json
 import sys
+from dataclasses import asdict
 from pathlib import Path
+from typing import Any
 
 _SRC_ROOT = Path(__file__).resolve().parents[1]
 _repo_s = str(Path(__file__).resolve().parents[2])
@@ -15,10 +18,11 @@ if str(_SRC_ROOT) not in sys.path:
 if _repo_s not in sys.path:
     sys.path.append(_repo_s)
 
-from dev_sim.economy import SettlementStatus
+from dev_sim.agents_payload import get_session_agents
+from dev_sim.economy import CompanyState, SettlementStatus
 from dev_sim.tycoon_sprint import company_state_path, run_mock_sprint
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
@@ -33,11 +37,26 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+        "http://localhost:4173",
+        "http://127.0.0.1:4173",
+        "http://localhost:5174",
+        "http://127.0.0.1:5174",
+        "http://localhost:4174",
+        "http://127.0.0.1:4174",
     ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def _load_company_or_fresh(path: Path) -> CompanyState:
+    if not path.is_file():
+        return CompanyState()
+    try:
+        return CompanyState.load_state(path)
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        return CompanyState()
 
 
 class SprintRequest(BaseModel):
@@ -65,6 +84,8 @@ class SprintResponse(BaseModel):
     tech_debt_delta: float
     actual_mrr: float
     balance: float
+    opening_balance: float = 0.0
+    closing_balance: float = 0.0
     valuation: float
     tech_debt: float
     hype_multiplier: float
@@ -73,6 +94,28 @@ class SprintResponse(BaseModel):
     burn_rate: float
     sprint_month: int
     status: SettlementStatus
+    ledger_lines: list[dict[str, Any]] = Field(default_factory=list)
+
+
+@app.get("/api/agents")
+def get_agents(
+    seed: int | None = Query(None, description="RNG seed used only on the first sample for this process."),
+    refresh: bool = Query(False, description="If true, discard cached personas and sample again."),
+) -> dict[str, Any]:
+    """Personas for the two dev-sim agents; sampled once per process then reused (unless ``refresh``)."""
+    rs = None if seed is None else seed ^ 0x9E3779B9
+    return get_session_agents(coding_seed=seed, review_seed=rs, force_refresh=refresh)
+
+
+@app.get("/api/company")
+def get_company() -> dict[str, Any]:
+    """Return :class:`CompanyState` plus ``persisted`` when loaded from disk."""
+    path = company_state_path()
+    persisted = path.is_file()
+    company = _load_company_or_fresh(path)
+    out: dict[str, Any] = asdict(company)
+    out["persisted"] = persisted
+    return out
 
 
 @app.post("/api/simulate", response_model=SprintResponse)

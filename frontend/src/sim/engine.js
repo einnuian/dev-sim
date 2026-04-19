@@ -89,7 +89,10 @@ export function tick(dt) {
     if (eventTimer > 35 + Math.random() * 15) { eventTimer = 0; drawRandomEvent(); }
 
     if (state.sprint.elapsed >= state.sprint.duration) {
-      void endSprint();
+      void endSprint().catch((err) => {
+        pushTick('event', 'System', `Sprint settlement error: ${err?.message || err}`);
+        notify();
+      });
     }
   } else {
     state.ui.sprintHeat = 0;
@@ -266,6 +269,11 @@ export function startSprint() {
   notify();
 }
 
+function sprintSpecText() {
+  const titles = (state.sprint.backlog || []).slice(0, 5).map((t) => t.title || t.id).join('; ');
+  return `Sprint ${state.sprint.number} scope: ${titles}`.slice(0, 4000);
+}
+
 export async function endSprint() {
   state.sprint.phase = 'review';
   // Python tycoon ledger: mock audit + monthly settlement (POST /api/simulate)
@@ -275,7 +283,7 @@ export async function endSprint() {
   try {
     const payload = await runTycoonSprint(
       `Sprint ${state.sprint.number}`,
-      `${state.sprint.backlog.length} tickets in backlog`,
+      sprintSpecText(),
       Number(expectedMrr),
       teamSum,
     );
@@ -286,7 +294,11 @@ export async function endSprint() {
       toast(`Post-sprint GitHub export: ${tp.url}`, 'good');
     }
     const burn = state.economy.lastSettlementBurn ?? state.economy.burnRate;
-    if (state.economy.cash > 0 && state.economy.activeMrr * 4 > burn) state.stats.profitableSprints++;
+    const mrrForCompare =
+      typeof state.economy.activeMrr === 'number' && Number.isFinite(state.economy.activeMrr)
+        ? state.economy.activeMrr
+        : state.economy.mrr;
+    if (state.economy.cash > 0 && mrrForCompare * 4 > burn) state.stats.profitableSprints++;
     if (payload.status === 'SERIES_A') {
       toast('Series A: valuation reached $2M!', 'gold');
     } else if (payload.status === 'OUTAGE_SURVIVED') {
@@ -296,21 +308,33 @@ export async function endSprint() {
     }
   } catch (err) {
     toast(`Tycoon sync failed: ${err?.message || err}. Using local fallback.`, 'bad');
-    state.economy.cash -= state.economy.burnRate;
-    state.economy.cash += state.economy.mrr * 4;
+    const opening = state.economy.cash;
+    const burn = state.economy.burnRate;
+    const rev = state.economy.mrr * 4;
+    state.economy.cash -= burn;
+    state.economy.cash += rev;
+    state.economy.lastSprintLedger = {
+      sprintMonth: state.economy.sprintMonth,
+      opening,
+      closing: state.economy.cash,
+      lines: [
+        { label: 'Recurring revenue (local estimate)', amount: rev, kind: 'credit' },
+        { label: 'Operating burn (local estimate)', amount: -burn, kind: 'debit' },
+        { label: 'Net change to cash', amount: state.economy.cash - opening, kind: 'net' },
+      ],
+    };
+    notify();
     if (state.economy.cash > 0 && state.economy.mrr * 4 > state.economy.burnRate) state.stats.profitableSprints++;
   }
   if (state.stats.sprintBugs === 0) state.stats.zeroBugSprints++;
   state.stats.sprintBugs = 0;
   if (Math.random() < 0.3) state.stats.fridayShips++;
-  // build retro line per agent
   for (const a of state.team) {
     if (a.fired) continue;
     a.speaking = { text: makeRetro(a, { peer: rand(state.team.filter(x => x.id !== a.id))?.displayName || 'team' }), ttl: 6 };
     a.activity = 'speak';
     a.activityTtl = 6;
   }
-  // compute scores -> open HR review modal
   const scores = computeScores();
   state.history.push({
     sprint: state.sprint.number,
@@ -324,6 +348,7 @@ export async function endSprint() {
   if (state.economy.cash <= 0) {
     setTimeout(() => openModal('game-over', {}), 200);
   }
+  notify();
 }
 
 export function computeScores() {
@@ -471,7 +496,7 @@ export function actionHire(candidateId, firedId) {
     fired: false, sprintsServed: 0,
     energy: 90, morale: 70, focus: 80, loyalty: 70, reputation: 50, burnout: 0,
     speaking: { text: 'Excited to be here.', ttl: 4 },
-    activity: 'speak', activityTtl: 4, desk: 0, px: 0, py: 0,
+    activity: 'speak', activityTtl: 4, desk: 0, px: 0, py: 0, _officePlaced: false,
   };
   // replace fired slot
   const idx = state.team.findIndex(a => a.id === firedId);

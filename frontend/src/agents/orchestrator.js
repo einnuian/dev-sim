@@ -1,8 +1,8 @@
 // Multi-agent orchestrator (CEO chat). A prompt flows through:
 //   1. Scrum Master  -> assigns coder + reviewer (in-world)
-//   2–4. Real work    -> POST /api/orchestrate → dev_sim_bridge runs ``dev_sim`` coding agent,
-//                       K2 PR review, and optional follow-up (same as ``python -m dev_sim.orchestrate``).
-//   5. HUD / economy  -> maps K2 verdict into scores, PR feed, and HR-style rewards.
+//   2–4. Real work    -> POST /api/orchestrate → dev_sim_bridge plans sprints then runs
+//                       coding agent → K2 review → optional follow-up per sprint (``dev-sim-run``).
+//   5. HUD / economy  -> maps K2 verdict into scores, PR feed, and HR-style rewards (final sprint).
 //
 // Everything emits ticker events and runs against the existing state object.
 
@@ -54,8 +54,12 @@ function startMatrixStream() {
   }, 90);
 }
 
-function pickByRole(role) {
-  return state.team.find(a => !a.fired && a.role === role) || state.team.find(a => !a.fired);
+function pickCodingAgent() {
+  return state.team.find(a => !a.fired && a.agentKind === 'coding');
+}
+
+function pickReviewAgent() {
+  return state.team.find(a => !a.fired && a.agentKind === 'review');
 }
 
 // Sanitize the iframe content: drop scripts that escape origin.
@@ -108,10 +112,14 @@ function buildDevSimSummaryHtml(project, prompt, lp, api) {
   const title = escHtml(project.name || project.id);
   const p = escHtml(prompt.slice(0, 800));
   const v = escHtml(String(api.verdict || ''));
+  const sprintNote = Array.isArray(api.plannedSprints) && api.plannedSprints.length > 1
+    ? `<p><strong>Sprints:</strong> ${api.plannedSprints.length} planned; summary reflects the <em>final</em> PR.</p>`
+    : '';
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><title>${title}</title></head>
 <body style="margin:0;background:#06080d;color:#e8ecf6;font-family:system-ui,sans-serif;padding:24px;min-height:100vh">
   <h1 style="margin-top:0">${title}</h1>
-  <p>This CEO request was executed by the <strong>dev-sim</strong> coding and K2 review agents (see GitHub for the real diff).</p>
+  <p>This CEO request was executed by the <strong>dev-sim</strong> planner, coding agent, and K2 review (see GitHub for the real diff).</p>
+  ${sprintNote}
   <p><strong>Verdict:</strong> ${v}</p>
   <p><a href="${url}" style="color:#9ef0a6">Open GitHub pull request</a></p>
   <p style="opacity:0.85;white-space:pre-wrap">${p}</p>
@@ -154,15 +162,19 @@ export async function runProject(prompt) {
   const projId = `PRJ-${projectCounter++}`;
   pushTick('event', 'CEO', `requested project: "${prompt}"`);
 
-  const sm = pickByRole('scrum_master');
-  const coder = pickByRole('frontend') || pickByRole('backend') || pickByRole('tech_lead');
-  const tlead = pickByRole('tech_lead') || pickByRole('backend') || pickByRole('frontend');
-  const arch = pickByRole('solutions_architect') || tlead;
-
-  if (!sm || !coder || !tlead) {
-    toast('Not enough team members to run a project.', 'bad');
+  const coder = pickCodingAgent();
+  const reviewer = pickReviewAgent();
+  if (!coder || !reviewer) {
+    toast('Load the dev-sim team (start the API / bridge so /api/agents succeeds).', 'bad');
     return;
   }
+  if (!state.backendPersonaPayload?.coding || !state.backendPersonaPayload?.review) {
+    toast('Team personas are not loaded. Start ``python run_api.py`` and reload the page.', 'bad');
+    return;
+  }
+  const sm = reviewer;
+  const tlead = reviewer;
+  const arch = reviewer;
 
   const rev = readCeoRevenueExpectations();
   const project = {
@@ -195,13 +207,17 @@ export async function runProject(prompt) {
   notify();
   setTyping(coder);
   emit(project, coder, `Handing this to the **dev-sim** coding agent (Claude) on the workstation…`);
-  await say(coder, 'standup', { yesterday: 'reviewing the brief', today: 'running dev-sim orchestrate' },
-    `Running full repo + PR pipeline. This can take several minutes.`);
+  await say(coder, 'standup', { yesterday: 'reviewing the brief', today: 'running dev-sim-run pipeline' },
+    `Planning sprints, then full repo + PR pipeline per sprint. This can take a long time.`);
 
   let api;
   startMatrixStream();
   try {
-    api = await runDevSimOrchestrate(prompt, rev);
+    api = await runDevSimOrchestrate(prompt, {
+      ...rev,
+      coding: state.backendPersonaPayload?.coding,
+      review: state.backendPersonaPayload?.review,
+    });
   } catch (e) {
     project.phase = 'done';
     project.error = e?.message || String(e);
@@ -220,6 +236,12 @@ export async function runProject(prompt) {
     toast(project.error, 'bad');
     notify();
     return;
+  }
+
+  const planned = Array.isArray(api.plannedSprints) ? api.plannedSprints : [];
+  if (planned.length > 0) {
+    const lines = planned.map((s) => `Sprint ${s.number}: ${s.title || '(untitled)'}`).join(' · ');
+    emit(project, sm, `Planner split this into ${planned.length} sprint(s): ${lines}`);
   }
 
   const lp = api.lastPr;
@@ -278,7 +300,7 @@ export async function runProject(prompt) {
     ? String(api.review.summary).slice(0, 200)
     : `K2 verdict: ${api.verdict || 'n/a'}`;
   project.readme = buildReadme(project.name, prompt, tplKey, [
-    makeAgentNote(sm, `CEO request routed to dev-sim orchestrate: "${prompt.slice(0, 120)}".`),
+    makeAgentNote(sm, `CEO request routed to dev-sim (plan → sprints → orchestrate): "${prompt.slice(0, 120)}".`),
     rev.expectedOneTime > 0 || rev.expectedMonthly > 0
       ? makeAgentNote(
           sm,

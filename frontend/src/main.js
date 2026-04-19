@@ -3,14 +3,42 @@ import { createCanvasContext } from './core/createCanvasContext.js';
 import { createRenderLoop } from './loop/createRenderLoop.js';
 import { createResizer } from './system/createResizer.js';
 import { drawScene, agentAt } from './draw/scene.js';
+import { fetchCompanyState } from './api/economyApi.js';
+import { fetchDevTeamAgents } from './api/agentsApi.js';
 import { initHud } from './hud/render.js';
 import { tick } from './sim/engine.js';
-import { state, openModal } from './state/store.js';
+import { state, openModal, notify, applyBackendTeam } from './state/store.js';
 
 const { canvas, ctx } = createCanvasContext('#stage');
 const { viewport } = createResizer(canvas);
 
 initHud();
+
+async function hydrateEconomyFromServer() {
+  try {
+    const d = await fetchCompanyState();
+    if (!d.persisted) return;
+    state.economy.cash = Math.round(Number(d.balance) || 0);
+    state.economy.mrr = Math.round(Number(d.active_mrr) || 0);
+    state.economy.techDebt = Math.min(100, Math.max(0, Number(d.tech_debt) || 0));
+    state.economy.valuation = Number(d.valuation) || 0;
+    state.economy.hypeMultiplier = Number(d.hype_multiplier) || 1;
+    notify();
+  } catch {
+    /* FastAPI not running or first run — keep baked-in defaults */
+  }
+}
+void hydrateEconomyFromServer();
+
+async function hydrateAgentsFromServer() {
+  try {
+    const payload = await fetchDevTeamAgents();
+    applyBackendTeam(payload);
+  } catch {
+    /* FastAPI / bridge not running — roster stays empty until reload */
+  }
+}
+void hydrateAgentsFromServer();
 
 // click on canvas -> agent
 canvas.addEventListener('click', (e) => {

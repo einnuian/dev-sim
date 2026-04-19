@@ -50,16 +50,24 @@ pnpm preview      # serve the prod bundle
 
 Open `http://localhost:5173`.
 
-### CEO chat → real `dev_sim` agents
+The game UI is **Vite + vanilla JS** (not React). It talks to two optional local backends:
 
-The canvas UI no longer stores LLM or GitHub credentials. To run **Claude coding agent → K2 review → optional follow-up** (same as `python -m dev_sim.orchestrate`), start the small HTTP bridge from the **repository root** in a second terminal:
+### Economy / tycoon ledger (FastAPI)
+
+Sprint settlement, mock K2 technical scores, and `CompanyState` persistence live in `src/dev_sim/api.py`. From the **repository root**:
 
 ```bash
-# Repo root — uses .env for ANTHROPIC_API_KEY, GITHUB_TOKEN, K2_API_KEY
-python -m dev_sim_bridge
+python run_api.py
 ```
 
-`npm run dev` proxies `/api` to `http://127.0.0.1:8765`. Use the chat **Agents** button for a short reminder.
+This serves **`POST /api/simulate`** and **`GET /api/company`** on **port 8000**.
+
+- **Canvas game** (`frontend/`): `npm run dev` on port **5173** proxies `/api/simulate` and `/api/company` to 8000 and calls the API from vanilla JS when a sprint ends.
+- **React dashboard** (`economy-dashboard/`): `npm run dev` on port **5174** — full roster + audit UI; see [`economy-dashboard/README.md`](economy-dashboard/README.md).
+
+### CEO chat → real `dev_sim` agents (optional bridge)
+
+From team chat, **`python -m dev_sim_bridge`** (port **8765**) runs the same flow as **`dev-sim-run`**: **planning** (decompose the CEO prompt into ordered sprints), then for each sprint **Claude coding agent → K2 review → optional follow-up**. Vite proxies **`/api/orchestrate`** (and **`/api/health`**) to that bridge. Use the chat **Agents** button for a short reminder.
 
 ---
 

@@ -160,8 +160,8 @@ def main() -> None:
     parser.add_argument(
         "--progress-interval",
         type=float,
-        default=10.0,
-        help="Seconds between progress announcements (default: 10)",
+        default=30.0,
+        help="Seconds between progress announcements (default: 30)",
     )
     args = parser.parse_args()
 
@@ -212,7 +212,7 @@ def main() -> None:
         persona_system_suffix=coding_suffix,
         persona_dict=coding_persona_dict,
         agent_progress=prog,
-        progress_log_path=ws / "dev-sim-agent-progress.log",
+        progress_log_path=ws / "dev-sim-agents-progress.log",
         progress_interval_sec=prog_iv,
     )
     last_pr = r1.get("last_pr")
@@ -240,7 +240,7 @@ def main() -> None:
         persona_system_prefix=review_prefix,
         persona_dict=review_persona_dict,
         agent_progress=prog,
-        progress_log_path=ws / "dev-sim-review-progress.log",
+        progress_log_path=ws / "dev-sim-agents-progress.log",
         progress_interval_sec=prog_iv,
     )
     if not review_out.get("ok"):
@@ -290,7 +290,7 @@ def main() -> None:
         persona_system_suffix=coding_suffix,
         persona_dict=coding_persona_dict,
         agent_progress=prog,
-        progress_log_path=ws / "dev-sim-agent-progress.log",
+        progress_log_path=ws / "dev-sim-agents-progress.log",
         progress_interval_sec=prog_iv,
     )
 

@@ -82,19 +82,19 @@ def main() -> None:
     parser.add_argument(
         "--no-agent-progress",
         action="store_true",
-        help="Disable 10s progress announcements and progress log file",
+        help="Disable periodic progress announcements and progress log file",
     )
     parser.add_argument(
         "--progress-log",
         type=Path,
         default=None,
-        help="Append progress log here (default: <workspace>/dev-sim-agent-progress.log)",
+        help="Append progress log here (default: <workspace>/dev-sim-agents-progress.log)",
     )
     parser.add_argument(
         "--progress-interval",
         type=float,
         default=30.0,
-        help="Seconds between in-character progress announcements (default: 10)",
+        help="Seconds between in-character progress announcements (default: 30)",
     )
     args = parser.parse_args()
 

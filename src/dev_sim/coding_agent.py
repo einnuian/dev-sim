@@ -21,6 +21,7 @@ import httpx
 from dev_sim.agent_progress import AgentProgressLogger, ProgressAnnouncer
 from dev_sim.config import get_anthropic_api_key, load_env
 
+# Intentionally omits log/status/branch/show/diff-style archaeology — use read_workspace_file to read files.
 ALLOWED_GIT_SUBCOMMANDS = frozenset(
     {
         "init",
@@ -30,10 +31,7 @@ ALLOWED_GIT_SUBCOMMANDS = frozenset(
         "push",
         "pull",
         "remote",
-        "branch",
         "checkout",
-        "status",
-        "log",
         "config",
         "fetch",
         "merge",
@@ -45,6 +43,10 @@ ALLOWED_GIT_SUBCOMMANDS = frozenset(
 # Instructions and guardrails for the model; kept in code (not a file) so installs always match behavior.
 SYSTEM_PROMPT = """You are a coding assistant with tools to create GitHub repositories, run git commands locally, and open pull requests for human review.
 
+**Use as few tool calls as possible.** Prefer the coarse tools below over many small `run_git` steps.
+`run_git` only allows: add, checkout, commit, push, pull, fetch, merge, remote, config, init, clone, mv, rm — **not** log, status, branch, show, or diff (those tools are unavailable on purpose).
+There is **no** `list_workspace` tool. To read a file before editing, use **`read_workspace_file`**. Do not call `get_github_repository_metadata` before `prepare_repo_branch_for_work`; after `prepare_repo_branch_for_work` you already have `default_branch` for PRs. Avoid redundant reads of the same file.
+
 Repo name registry (short name -> remote URL):
 - When create_github_repository succeeds, the CLI automatically saves the GitHub repo `name` and HTTPS `clone_url` into the repo registry file (you do not need to call upsert_repo_registry_entry for that case).
 - At the start of work involving a known project, call read_repo_registry to resolve friendly names to clone URLs.
@@ -54,20 +56,20 @@ Repo name registry (short name -> remote URL):
 General guidelines:
 - Use create_github_repository when the user wants a new repo on GitHub. Prefer concise names and clear descriptions.
 - After creating a repo, use git_clone_repository with the returned clone_url (use the https URL) into the workspace, or git_init_local + git_set_remote if you prefer a fresh init.
-- Implement changes with write_workspace_file paths under the clone directory (e.g. my-repo/README.md), then run_git with add, commit, push as needed.
+- **Multiple files:** use `write_workspace_files` (one call with a `files` array) instead of many `write_workspace_file` calls when you touch more than one path.
+- **Single file:** `write_workspace_file` is fine.
+- After edits: use `run_git` with add and commit (often one add of `.` and one commit is enough).
 - For first push to a new empty repo, use branch name main unless the remote uses another default.
 - Never echo or reveal API keys or tokens. If credentials are missing, explain what env vars are required.
 - If a git command fails, read the error and adjust (e.g. set user.name / user.email with git config if commit requires them).
-- Before git push to GitHub over HTTPS, call rewrite_origin_for_github_token_push if GITHUB_TOKEN is available (it is injected by the CLI when set); otherwise the user must configure credentials (SSH remote or gh auth).
 
 Pull request workflow (when the user wants a PR or standard team workflow):
 1. Ensure you have a local clone (git_clone_repository) with origin pointing at github.com.
-2. Fetch and check out the default branch: use get_github_repository_metadata to learn default_branch, then run_git checkout that branch, run_git pull (or fetch + merge as appropriate).
-3. Create a new branch from that tip: run_git with checkout -b <feature-branch> (descriptive name, e.g. feature/add-readme).
-4. Make edits with write_workspace_file under the repo subdirectory, then run_git add, run_git commit.
-5. run_git push -u origin <feature-branch> (after rewrite_origin_for_github_token_push when using HTTPS with GITHUB_TOKEN).
-6. Call create_github_pull_request with repo_subdir, head_branch = feature branch, base_branch from get_github_repository_metadata, title, and optional body. Use draft true only if the user asked for a draft.
-7. After the PR is opened, give the user the PR html_url. Do not merge or approve PRs via API or git merge to main; a human will review and merge on GitHub.
+2. **One tool —** call `prepare_repo_branch_for_work` with `repo_subdir` and `feature_branch` (e.g. feature/add-readme). It fetches origin, checks out the remote default branch, pulls, and creates your feature branch. Do **not** replace this with separate get_github_repository_metadata + multiple run_git calls unless it fails and you must recover manually.
+3. Make edits under the repo subdirectory; prefer `write_workspace_files` when changing several files.
+4. **One tool —** call `push_feature_branch` with `repo_subdir` and `branch` to embed the GitHub token for HTTPS (when set) and `git push -u origin <branch>`. Prefer this over rewrite_origin_for_github_token_push + run_git push as two steps.
+5. Call `create_github_pull_request` with repo_subdir, head_branch = your feature branch, and **base_branch** copied from the `default_branch` field returned by `prepare_repo_branch_for_work` (keep it in memory—do not call `get_github_repository_metadata` just to re-fetch the same value). Use draft true only if the user asked for a draft.
+6. After the PR is opened, give the user the PR html_url. Do not merge or approve PRs via API or git merge to main; a human will review and merge on GitHub.
 
 Direct push to main without a PR: only when the user explicitly asks to skip the PR workflow.
 """
@@ -161,7 +163,8 @@ def _tool_specs() -> list[dict[str, Any]]:
             "name": "run_git",
             "description": (
                 f"Run git in a subdirectory of the workspace. Allowed first argument must be one of: "
-                f"{', '.join(sorted(ALLOWED_GIT_SUBCOMMANDS))}."
+                f"{', '.join(sorted(ALLOWED_GIT_SUBCOMMANDS))}. Prefer coarse tools "
+                f"(prepare_repo_branch_for_work, push_feature_branch) for the standard PR workflow."
             ),
             "input_schema": {
                 "type": "object",
@@ -177,6 +180,50 @@ def _tool_specs() -> list[dict[str, Any]]:
                     },
                 },
                 "required": ["repo_subdir", "args"],
+            },
+        },
+        {
+            "name": "prepare_repo_branch_for_work",
+            "description": (
+                "After clone: fetch origin, check out the remote default branch, fast-forward pull from "
+                "origin, then create and check out feature_branch. Prefer this over separate "
+                "get_github_repository_metadata + multiple run_git calls. Returns default_branch for PR base."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_subdir": {
+                        "type": "string",
+                        "description": "Repository root relative to workspace",
+                    },
+                    "feature_branch": {
+                        "type": "string",
+                        "description": "New branch to create from updated default (e.g. feature/add-readme)",
+                    },
+                },
+                "required": ["repo_subdir", "feature_branch"],
+            },
+        },
+        {
+            "name": "push_feature_branch",
+            "description": (
+                "Rewrite origin for HTTPS token push (when GITHUB_TOKEN is set) and run "
+                "`git push -u origin <branch>`. Prefer this over rewrite_origin_for_github_token_push "
+                "plus a separate run_git push."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "repo_subdir": {
+                        "type": "string",
+                        "description": "Repository root relative to workspace",
+                    },
+                    "branch": {
+                        "type": "string",
+                        "description": "Branch name to push (must match your current branch)",
+                    },
+                },
+                "required": ["repo_subdir", "branch"],
             },
         },
         {
@@ -197,16 +244,56 @@ def _tool_specs() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "list_workspace",
-            "description": "List files and directories under the workspace (non-hidden), max depth 4.",
-            "input_schema": {"type": "object", "properties": {}, "required": []},
+            "name": "write_workspace_files",
+            "description": (
+                "Create or overwrite several files under the workspace in one call. "
+                "Prefer this over multiple write_workspace_file calls when you touch more than one path."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "files": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "relative_path": {
+                                    "type": "string",
+                                    "description": "Path relative to workspace root",
+                                },
+                                "content": {"type": "string", "description": "Full file contents"},
+                            },
+                            "required": ["relative_path", "content"],
+                        },
+                        "description": "Up to 40 files per call",
+                    },
+                },
+                "required": ["files"],
+            },
+        },
+        {
+            "name": "read_workspace_file",
+            "description": (
+                "Read a UTF-8 text file under the workspace (for inspecting code before editing). "
+                "Prefer this over trying to read files through git. Large files are truncated."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "relative_path": {
+                        "type": "string",
+                        "description": "Path relative to workspace root",
+                    },
+                },
+                "required": ["relative_path"],
+            },
         },
         {
             "name": "rewrite_origin_for_github_token_push",
             "description": (
                 "Rewrite git remote origin to use HTTPS with the token from the GITHUB_TOKEN "
-                "environment variable so git push works non-interactively. Does not expose the "
-                "token in chat. Only works for github.com HTTPS URLs."
+                "environment variable so git push works non-interactively. Prefer push_feature_branch "
+                "for the usual feature-branch push; use this only for custom flows."
             ),
             "input_schema": {
                 "type": "object",
@@ -222,9 +309,9 @@ def _tool_specs() -> list[dict[str, Any]]:
         {
             "name": "get_github_repository_metadata",
             "description": (
-                "Fetch GitHub API metadata for the repository pointed to by git remote origin "
-                "(owner/repo parsed from the URL). Returns default_branch, html_url, and related "
-                "fields. Call this before create_github_pull_request to set base_branch correctly."
+                "Last resort: GitHub API metadata (default_branch, etc.) from origin. **Do not** use "
+                "for the normal PR flow if you already ran prepare_repo_branch_for_work (it returns "
+                "default_branch). Only call if prepare failed or you are fixing a broken clone by hand."
             ),
             "input_schema": {
                 "type": "object",
@@ -242,7 +329,7 @@ def _tool_specs() -> list[dict[str, Any]]:
             "description": (
                 "Open a pull request on github.com for the repo in repo_subdir (origin must be "
                 "github.com). Same-repo workflow: head_branch is the branch name pushed to origin. "
-                "Use get_github_repository_metadata for base_branch (default branch name)."
+                "base_branch must match default_branch from prepare_repo_branch_for_work."
             ),
             "input_schema": {
                 "type": "object",
@@ -257,7 +344,7 @@ def _tool_specs() -> list[dict[str, Any]]:
                     },
                     "base_branch": {
                         "type": "string",
-                        "description": "Target branch (e.g. main); prefer value from get_github_repository_metadata",
+                        "description": "Target branch (e.g. main); use default_branch from prepare_repo_branch_for_work",
                     },
                     "title": {"type": "string", "description": "PR title"},
                     "body": {"type": "string", "description": "PR description (markdown)"},
@@ -565,6 +652,122 @@ def _github_get_repository_metadata(token: str, owner: str, repo: str) -> dict[s
     }
 
 
+_MAX_WRITE_BATCH = 40
+_MAX_WRITE_FILE_BYTES = 750_000
+
+
+def _tool_prepare_repo_branch_for_work(
+    workspace: Path,
+    repo_subdir: str,
+    feature_branch: str,
+    github_token: str | None,
+) -> dict[str, Any]:
+    """Fetch, update default branch, create feature branch — replaces several git + metadata tools."""
+    if not github_token:
+        return {"ok": False, "error": "GITHUB_TOKEN is required."}
+    fb = (feature_branch or "").strip()
+    if not fb:
+        return {"ok": False, "error": "feature_branch must be non-empty"}
+    repo = _resolve_under_workspace(workspace, repo_subdir)
+    slug = _origin_github_owner_repo(repo)
+    if slug.get("error"):
+        return {"ok": False, **slug}
+    meta = _github_get_repository_metadata(github_token, str(slug["owner"]), str(slug["repo"]))
+    if not meta.get("ok"):
+        return {"ok": False, "metadata": meta}
+    base = str(meta.get("default_branch") or "main").strip() or "main"
+
+    steps: list[dict[str, Any]] = []
+
+    def _step(args: list[str]) -> dict[str, Any]:
+        r = _run_git_subprocess(repo, args)
+        steps.append({"args": args, **r})
+        return r
+
+    r0 = _step(["fetch", "origin"])
+    if r0.get("returncode") != 0:
+        return {"ok": False, "default_branch": base, "failed_at": "fetch", "steps": steps}
+
+    r1 = _step(["checkout", base])
+    if r1.get("returncode") != 0:
+        r1b = _step(["checkout", "-B", base, f"origin/{base}"])
+        if r1b.get("returncode") != 0:
+            return {"ok": False, "default_branch": base, "failed_at": "checkout_default", "steps": steps}
+
+    r2 = _step(["pull", "--ff-only", "origin", base])
+    if r2.get("returncode") != 0:
+        return {"ok": False, "default_branch": base, "failed_at": "pull", "steps": steps}
+
+    r3 = _step(["checkout", "-b", fb])
+    if r3.get("returncode") != 0:
+        return {"ok": False, "default_branch": base, "failed_at": "checkout_new_branch", "steps": steps}
+
+    return {
+        "ok": True,
+        "default_branch": base,
+        "feature_branch": fb,
+        "repository": meta.get("full_name"),
+        "html_url": meta.get("html_url"),
+        "steps": steps,
+    }
+
+
+def _tool_write_workspace_files(workspace: Path, files_raw: Any) -> dict[str, Any]:
+    if not isinstance(files_raw, list):
+        return {"ok": False, "error": "files must be a list"}
+    if len(files_raw) > _MAX_WRITE_BATCH:
+        return {"ok": False, "error": f"at most {_MAX_WRITE_BATCH} files per call"}
+    written: list[str] = []
+    for i, item in enumerate(files_raw):
+        if not isinstance(item, dict):
+            return {"ok": False, "error": f"files[{i}] must be an object"}
+        rel = item.get("relative_path")
+        content = item.get("content")
+        if not isinstance(rel, str) or not isinstance(content, str):
+            return {"ok": False, "error": f"files[{i}] needs string relative_path and content"}
+        if len(content.encode("utf-8")) > _MAX_WRITE_FILE_BYTES:
+            return {"ok": False, "error": f"files[{i}] exceeds max size"}
+        path = _resolve_under_workspace(workspace, rel)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        written.append(rel)
+    return {"ok": True, "written": written, "count": len(written)}
+
+
+def _tool_push_feature_branch(
+    workspace: Path,
+    repo_subdir: str,
+    branch: str,
+    github_token: str | None,
+) -> dict[str, Any]:
+    br = (branch or "").strip()
+    if not br:
+        return {"ok": False, "error": "branch must be non-empty"}
+    repo = _resolve_under_workspace(workspace, repo_subdir)
+    cur = _run_git_subprocess(repo, ["rev-parse", "--abbrev-ref", "HEAD"])
+    head = (cur.get("stdout") or "").strip()
+    if cur.get("returncode") != 0:
+        return {"ok": False, "error": "could not read current branch", "git": cur}
+    if head != br:
+        return {
+            "ok": False,
+            "error": f"current branch is {head!r}, expected {br!r}; checkout the feature branch first",
+        }
+    steps: list[dict[str, Any]] = []
+    if github_token:
+        rw = _rewrite_origin_github_token(repo, github_token)
+        steps.append({"step": "rewrite_origin", **rw})
+        if rw.get("returncode") is not None and rw.get("returncode") != 0:
+            return {"ok": False, "failed_at": "rewrite_origin", "steps": steps}
+        if rw.get("ok") is False and rw.get("returncode") is None:
+            return {"ok": False, "failed_at": "rewrite_origin", "steps": steps}
+    push = _run_git_subprocess(repo, ["push", "-u", "origin", br])
+    steps.append({"step": "push", "args": ["push", "-u", "origin", br], **push})
+    if push.get("returncode") != 0:
+        return {"ok": False, "failed_at": "push", "steps": steps}
+    return {"ok": True, "branch": br, "steps": steps}
+
+
 def _github_create_pull_request(
     token: str,
     owner: str,
@@ -705,6 +908,25 @@ def _execute_tool(
             path.write_text(str(tool_input["content"]), encoding="utf-8")
             return {"ok": True, "path": str(path)}
 
+        if name == "write_workspace_files":
+            return _tool_write_workspace_files(workspace, tool_input.get("files"))
+
+        if name == "prepare_repo_branch_for_work":
+            return _tool_prepare_repo_branch_for_work(
+                workspace,
+                str(tool_input["repo_subdir"]),
+                str(tool_input["feature_branch"]),
+                github_token,
+            )
+
+        if name == "push_feature_branch":
+            return _tool_push_feature_branch(
+                workspace,
+                str(tool_input["repo_subdir"]),
+                str(tool_input["branch"]),
+                github_token,
+            )
+
         if name == "rewrite_origin_for_github_token_push":
             if not github_token:
                 return {"error": "GITHUB_TOKEN is not set in the environment."}
@@ -747,25 +969,17 @@ def _execute_tool(
                 }
             return pr
 
-        if name == "list_workspace":
-            lines: list[str] = []
-
-            def walk(p: Path, depth: int) -> None:
-                if depth > 4:
-                    return
-                try:
-                    for c in sorted(p.iterdir(), key=lambda x: x.name):
-                        if c.name.startswith("."):
-                            continue
-                        rel = c.relative_to(workspace)
-                        lines.append(f"{'  ' * depth}{rel.as_posix()}" + ("/" if c.is_dir() else ""))
-                        if c.is_dir():
-                            walk(c, depth + 1)
-                except OSError as e:
-                    lines.append(f"{p}: {e}")
-
-            walk(workspace, 0)
-            return {"paths": "\n".join(lines)[:12000]}
+        if name == "read_workspace_file":
+            _max_read = 400_000
+            path = _resolve_under_workspace(workspace, str(tool_input["relative_path"]))
+            if not path.is_file():
+                return {"ok": False, "error": "path is not a file or does not exist", "path": str(path)}
+            raw = path.read_bytes()
+            truncated = len(raw) > _max_read
+            if truncated:
+                raw = raw[:_max_read]
+            text = raw.decode("utf-8", errors="replace")
+            return {"ok": True, "path": str(path), "truncated": truncated, "content": text}
 
         return {"error": f"unknown tool: {name}"}
     except Exception as e:
@@ -793,7 +1007,7 @@ def run_coding_agent(
     persona_dict: dict[str, Any] | None = None,
     agent_progress: bool = True,
     progress_log_path: Path | None = None,
-    progress_interval_sec: float = 10.0,
+    progress_interval_sec: float = 30.0,
 ) -> dict[str, Any]:
     load_env()
     api_key = get_anthropic_api_key()
@@ -809,7 +1023,7 @@ def run_coding_agent(
     if persona_system_suffix and persona_system_suffix.strip():
         system_text = SYSTEM_PROMPT.rstrip() + "\n\n---\n\n" + persona_system_suffix.strip()
 
-    log_path = progress_log_path or (workspace / "dev-sim-agent-progress.log")
+    log_path = progress_log_path or (workspace / "dev-sim-agents-progress.log")
     if agent_progress:
         plog = AgentProgressLogger(log_path, agent_label="coding")
         plog.log_persona_start(persona_dict)

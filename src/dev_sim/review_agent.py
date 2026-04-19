@@ -302,7 +302,7 @@ def compute_k2_pr_review(
     persona_dict: dict[str, Any] | None = None,
     agent_progress: bool = True,
     progress_log_path: Path | None = None,
-    progress_interval_sec: float = 10.0,
+    progress_interval_sec: float = 30.0,
 ) -> dict[str, Any]:
     """
     Fetch PR diff, call K2, parse ``CodeReviewResult`` JSON. Does **not** post to GitHub.
@@ -333,7 +333,7 @@ def compute_k2_pr_review(
             "meta": None,
         }
 
-    log_path = progress_log_path or (Path.cwd() / "dev-sim-review-progress.log")
+    log_path = progress_log_path or (Path.cwd() / ".dev-sim-workspace" / "dev-sim-agents-progress.log")
     if agent_progress:
         plog = AgentProgressLogger(log_path, agent_label="k2_review")
         plog.log_persona_start(persona_dict)
@@ -463,7 +463,7 @@ def run_k2_pr_review(
     persona_dict: dict[str, Any] | None = None,
     agent_progress: bool = True,
     progress_log_path: Path | None = None,
-    progress_interval_sec: float = 10.0,
+    progress_interval_sec: float = 30.0,
 ) -> None:
     out = compute_k2_pr_review(
         token,

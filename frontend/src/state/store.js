@@ -1,5 +1,6 @@
 // Central reactive store. Plain JS — subscribe/dispatch.
-import { PERSONAS, CANDIDATE_POOL, SEED_BACKLOG, ROLE_LABELS } from '../data/personas.js';
+import { SEED_BACKLOG } from '../data/personas.js';
+import { agentFromBackendPersona } from '../data/backendPersona.js';
 
 const listeners = new Set();
 
@@ -15,21 +16,22 @@ function instantiateAgent(p) {
     activity: 'idle', activityTtl: 0,
     desk: 0, // assigned by scene
     px: 0, py: 0, // pixel position in office
+    /** Set true after scene.js places the sprite in front of a desk (do not use px/py === 0 alone). */
+    _officePlaced: false,
   };
 }
 
-function pickInitialTeam() {
-  const byRole = {};
-  for (const r of ['frontend','backend','scrum_master','tech_lead','solutions_architect']) {
-    byRole[r] = PERSONAS.filter(p => p.role === r);
-  }
-  return [
-    byRole.frontend[0],
-    byRole.backend[1],
-    byRole.scrum_master[0],
-    byRole.tech_lead[0],
-    byRole.solutions_architect[0],
-  ].map(instantiateAgent);
+/** Replace roster with the two dev-sim agents from ``GET /api/agents`` (coding + review). */
+export function applyBackendTeam(payload) {
+  const a1 = agentFromBackendPersona(payload.coding, 'coding');
+  const a2 = agentFromBackendPersona(payload.review, 'review');
+  state.team = [instantiateAgent(a1), instantiateAgent(a2)];
+  state.backendPersonaPayload = {
+    coding: clone(payload.coding),
+    review: clone(payload.review),
+  };
+  recomputeBurn();
+  notify();
 }
 
 export const state = {
@@ -44,8 +46,10 @@ export const state = {
     assignments: {}, // ticketId -> agentId
     progress: {},   // ticketId -> 0..1
   },
-  team: pickInitialTeam(),
-  candidatePool: clone(CANDIDATE_POOL),
+  team: [],
+  /** Raw ``coding`` / ``review`` persona dicts from ``GET /api/agents`` for orchestrate. */
+  backendPersonaPayload: null,
+  candidatePool: [],
   prs: [], // {id, ticket, agentId, status: open|review|merged|failed, additions, deletions, comments[]}
   ticker: [], // {ts, kind, who, text}
   achievements: [], // unlocked ids
@@ -59,8 +63,8 @@ export const state = {
     sprintHeat: 0,
   },
   economy: {
-    cash: 60000,
-    mrr: 1200,
+    cash: 200000,
+    mrr: 3000,
     contracts: [], // active client contracts
     burnRate: 0,
     techDebt: 0,
@@ -76,6 +80,8 @@ export const state = {
     lastTycoonStatus: null, // CONTINUE | SERIES_A | BANKRUPT | OUTAGE_SURVIVED
     /** MRR from shipped CEO products — lands in Python ledger next sprint settlement */
     pendingRecurringMrr: 0,
+    /** @type {null | { sprintMonth: number, opening: number|null, closing: number|null, lines: {label: string, amount: number, kind: string}[] }} */
+    lastSprintLedger: null,
   },
   stats: {
     commits: 0, prs: 0, builds: { pass: 0, fail: 0 },
@@ -153,6 +159,31 @@ export function applyTycoonApiResponse(payload) {
   if (pend != null && Number.isFinite(pend)) e.pendingRecurringMrr = pend;
   if (payload.technical_scores && typeof payload.technical_scores === 'object') {
     e.lastTechnicalScores = { ...payload.technical_scores };
+  }
+  const lines = payload.ledger_lines;
+  if (Array.isArray(lines)) {
+    const opening =
+      typeof payload.opening_balance === 'number' && Number.isFinite(payload.opening_balance)
+        ? payload.opening_balance
+        : null;
+    const closing =
+      typeof payload.closing_balance === 'number' && Number.isFinite(payload.closing_balance)
+        ? payload.closing_balance
+        : typeof payload.balance === 'number' && Number.isFinite(payload.balance)
+          ? payload.balance
+          : null;
+    e.lastSprintLedger = {
+      sprintMonth: typeof payload.sprint_month === 'number' ? payload.sprint_month : e.sprintMonth,
+      opening,
+      closing,
+      lines: lines
+        .filter((x) => x && typeof x === 'object')
+        .map((x) => ({
+          label: String(x.label || ''),
+          amount: Number(x.amount) || 0,
+          kind: String(x.kind || ''),
+        })),
+    };
   }
   notify();
 }

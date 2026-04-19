@@ -22,13 +22,10 @@ export function spawnFx(kind, x, y) {
 }
 
 function deskFor(i) {
-  // 5 desks arranged around the room
+  // Two desks: coding (left) and PR review (right), matching the live dev-sim pair
   const positions = [
-    { x: 5, y: 6 },
-    { x: 12, y: 6 },
-    { x: 19, y: 6 },
-    { x: 26, y: 6 },
-    { x: 16, y: 12 }, // tech lead in middle/back
+    { x: 10, y: 7 },
+    { x: 22, y: 7 },
   ];
   return positions[i] || positions[0];
 }
@@ -40,7 +37,7 @@ function targetForAgent(agent, idx) {
   return { x: d.x * TILE, y: (d.y + 1) * TILE };
 }
 
-// initialize positions on first render
+// initialize positions on first render (and after new agents replace the roster)
 function ensurePositions(viewportW, viewportH) {
   const room = computeRoom(viewportW, viewportH);
   const offsetX = room.x;
@@ -49,12 +46,14 @@ function ensurePositions(viewportW, viewportH) {
   let i = 0;
   for (const a of state.team) {
     if (a.fired) continue;
-    if (a.px === 0 && a.py === 0) {
+    if (!a._officePlaced) {
       const t = targetForAgent(a, i);
-      a.px = offsetX + t.x * tile / TILE;
-      a.py = offsetY + t.y * tile / TILE;
-      a.tx = a.px; a.ty = a.py;
+      a.px = offsetX + (t.x * tile) / TILE;
+      a.py = offsetY + (t.y * tile) / TILE;
+      a.tx = a.px;
+      a.ty = a.py;
       a.deskIdx = i;
+      a._officePlaced = true;
     }
     i++;
   }
@@ -183,7 +182,7 @@ export function drawScene(ctx, viewport, dt) {
   }
 
   // desks
-  const desks = [0,1,2,3,4].map(i => deskFor(i));
+  const desks = [0, 1].map((i) => deskFor(i));
   for (const d of desks) {
     drawDesk(ctx, ox + d.x * tile, oy + d.y * tile, tile);
   }

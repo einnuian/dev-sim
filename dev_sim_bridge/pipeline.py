@@ -24,10 +24,151 @@ from dev_sim.config import (
     resolve_k2_review_model,
 )
 from dev_sim.orchestrate import _followup_prompt
-from dev_sim.personas_bridge import coding_persona_bundle, review_persona_bundle
+from dev_sim.personas_bridge import (
+    coding_persona_bundle,
+    persona_slice_coding,
+    persona_slice_review,
+    review_persona_bundle,
+)
+from dev_sim.planner import run_planning_agent
 from dev_sim.push_target_repo import push_workspace_to_target
 from dev_sim.review_agent import compute_k2_pr_review, post_pr_issue_comment
 from dev_sim.tycoon_sprint import apply_shipped_product_economics
+
+
+def run_planned_orchestrate_for_prompt(
+    text: str,
+    *,
+    repo_root: Path,
+    workspace: Path | None = None,
+    repo_registry: Path | None = None,
+    max_turns: int = 24,
+    followup_max_turns: int = 24,
+    max_diff_chars: int = 200_000,
+    always_followup: bool = False,
+    no_review_comment: bool = False,
+    no_agent_progress: bool = True,
+    progress_interval_sec: float = 30.0,
+    expected_one_time: float = 0.0,
+    expected_monthly: float = 0.0,
+    coding_persona: dict[str, Any] | None = None,
+    review_persona: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Same env checks as ``run_orchestrate_for_prompt``, then ``run_planning_agent``,
+    then one full orchestrate pass per planned sprint (sequential, shared workspace).
+
+    On success, top-level ``lastPr`` / ``review`` / ``verdict`` / ``codingPass1`` / etc.
+    reflect the **final** sprint so the CEO UI stays compatible. ``sprintResults`` lists
+    each sprint; ``plannedSprints`` lists ``number`` and ``title`` only (compact).
+    """
+    load_env()
+    t = (text or "").strip()
+    if not t:
+        return {"ok": False, "error": "Prompt is empty."}
+    if not get_anthropic_api_key():
+        return {"ok": False, "error": "ANTHROPIC_API_KEY is not set (needed for planning and coding)."}
+    if not (get_github_token() or "").strip():
+        return {"ok": False, "error": "GITHUB_TOKEN is not set (needed for PRs and review)."}
+    if not get_k2_api_key():
+        return {"ok": False, "error": "K2_API_KEY is not set (needed for K2 PR review)."}
+
+    try:
+        sprints = run_planning_agent(t, model=None, planning_prompt_path=None)
+    except Exception as e:  # noqa: BLE001 — return to UI
+        return {"ok": False, "error": f"Planning failed: {e}"}
+
+    if not sprints:
+        return {"ok": False, "error": "Planner returned no sprints."}
+
+    planned_sprints: list[dict[str, Any]] = []
+    for s in sprints:
+        planned_sprints.append(
+            {
+                "number": s.get("number"),
+                "title": s.get("title"),
+            }
+        )
+
+    sprint_results: list[dict[str, Any]] = []
+    last_payload: dict[str, Any] | None = None
+
+    n_sprints = len(sprints)
+    for idx, sprint in enumerate(sprints):
+        sprompt = (sprint.get("prompt") or "").strip()
+        if not sprompt:
+            err = f"Sprint {sprint.get('number', '?')} has an empty prompt."
+            sprint_results.append(
+                {
+                    "number": sprint.get("number"),
+                    "title": sprint.get("title"),
+                    "ok": False,
+                    "error": err,
+                }
+            )
+            return {
+                "ok": False,
+                "error": err,
+                "plannedSprints": planned_sprints,
+                "sprintResults": sprint_results,
+            }
+
+        is_last = idx == n_sprints - 1
+        r = run_orchestrate_for_prompt(
+            sprompt,
+            repo_root=repo_root,
+            workspace=workspace,
+            repo_registry=repo_registry,
+            max_turns=max_turns,
+            followup_max_turns=followup_max_turns,
+            max_diff_chars=max_diff_chars,
+            always_followup=always_followup,
+            no_review_comment=no_review_comment,
+            no_agent_progress=no_agent_progress,
+            progress_interval_sec=progress_interval_sec,
+            expected_one_time=float(expected_one_time) if is_last else 0.0,
+            expected_monthly=float(expected_monthly) if is_last else 0.0,
+            coding_persona=coding_persona,
+            review_persona=review_persona,
+        )
+
+        entry: dict[str, Any] = {
+            "number": sprint.get("number"),
+            "title": sprint.get("title"),
+            "ok": bool(r.get("ok")),
+            "error": r.get("error"),
+            "lastPr": r.get("lastPr"),
+            "review": r.get("review"),
+            "verdict": r.get("verdict"),
+            "reviewRawOk": r.get("reviewRawOk"),
+            "postedReviewCommentUrl": r.get("postedReviewCommentUrl"),
+            "followUpSkipped": r.get("followUpSkipped"),
+            "codingPass1": r.get("codingPass1"),
+            "codingPass2": r.get("codingPass2"),
+        }
+        sprint_results.append(entry)
+
+        if not r.get("ok"):
+            out: dict[str, Any] = {
+                "ok": False,
+                "error": r.get("error") or "Sprint orchestration failed.",
+                "plannedSprints": planned_sprints,
+                "sprintResults": sprint_results,
+            }
+            if last_payload is not None:
+                out["lastPr"] = last_payload.get("lastPr")
+                out["review"] = last_payload.get("review")
+                out["verdict"] = last_payload.get("verdict")
+            return out
+
+        last_payload = r
+
+    assert last_payload is not None
+    merged: dict[str, Any] = {**last_payload}
+    merged["ok"] = True
+    merged["plannedSprints"] = planned_sprints
+    merged["sprintResults"] = sprint_results
+    return merged
 
 
 def run_orchestrate_for_prompt(
@@ -42,9 +183,11 @@ def run_orchestrate_for_prompt(
     always_followup: bool = False,
     no_review_comment: bool = False,
     no_agent_progress: bool = True,
-    progress_interval_sec: float = 10.0,
+    progress_interval_sec: float = 30.0,
     expected_one_time: float = 0.0,
     expected_monthly: float = 0.0,
+    coding_persona: dict[str, Any] | None = None,
+    review_persona: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Returns a JSON-serializable dict. Never calls ``sys.exit`` (unlike the CLI).
@@ -70,8 +213,20 @@ def run_orchestrate_for_prompt(
     k2_model = resolve_k2_review_model(None)
     reg = (repo_registry or (repo_root / DEFAULT_REPO_REGISTRY)).expanduser().resolve()
 
-    coding_suffix, coding_persona_dict = coding_persona_bundle(None, None)
-    review_prefix, review_persona_dict = review_persona_bundle(None)
+    if coding_persona is not None and review_persona is not None:
+        try:
+            coding_suffix = persona_slice_coding(coding_persona)
+            coding_persona_dict = coding_persona
+            review_prefix = persona_slice_review(review_persona)
+            review_persona_dict = review_persona
+        except (KeyError, TypeError, ValueError) as e:
+            return {
+                "ok": False,
+                "error": f"Invalid coding/review persona payload (must match generate_persona v2 roles): {e}",
+            }
+    else:
+        coding_suffix, coding_persona_dict = coding_persona_bundle(None, None)
+        review_prefix, review_persona_dict = review_persona_bundle(None)
     prog = not no_agent_progress
 
     r1 = run_coding_agent(
@@ -84,7 +239,7 @@ def run_orchestrate_for_prompt(
         persona_system_suffix=coding_suffix,
         persona_dict=coding_persona_dict,
         agent_progress=prog,
-        progress_log_path=ws / "dev-sim-agent-progress.log",
+        progress_log_path=ws / "dev-sim-agents-progress.log",
         progress_interval_sec=progress_interval_sec,
     )
     last_pr = r1.get("last_pr")
@@ -113,7 +268,7 @@ def run_orchestrate_for_prompt(
         persona_system_prefix=review_prefix,
         persona_dict=review_persona_dict,
         agent_progress=prog,
-        progress_log_path=ws / "dev-sim-review-progress.log",
+        progress_log_path=ws / "dev-sim-agents-progress.log",
         progress_interval_sec=progress_interval_sec,
     )
     if not review_out.get("ok"):
@@ -157,7 +312,7 @@ def run_orchestrate_for_prompt(
             persona_system_suffix=coding_suffix,
             persona_dict=coding_persona_dict,
             agent_progress=prog,
-            progress_log_path=ws / "dev-sim-agent-progress.log",
+            progress_log_path=ws / "dev-sim-agents-progress.log",
             progress_interval_sec=progress_interval_sec,
         )
         r2_summary = _serialize_run(r2)

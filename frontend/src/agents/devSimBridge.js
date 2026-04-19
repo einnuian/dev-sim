@@ -1,26 +1,37 @@
 /**
- * Calls the local dev_sim_bridge HTTP server, which runs ``dev_sim`` coding + K2 review
- * (same flow as ``python -m dev_sim.orchestrate``). Vite proxies ``/api`` → port 8765 in dev/preview.
+ * Calls the local dev_sim_bridge HTTP server: planning (``run_planning_agent``) then
+ * one coding → K2 → follow-up pass per planned sprint (same as ``dev-sim-run``).
+ * Vite proxies ``/api`` → port 8765 in dev/preview.
  */
 
 const API_PREFIX = (import.meta.env.VITE_DEV_SIM_API || '').replace(/\/$/, '');
 
 /**
  * @param {string} prompt
- * @param {{ expectedOneTime?: number, expectedMonthly?: number }} [opts]
+ * @param {{
+ *   expectedOneTime?: number,
+ *   expectedMonthly?: number,
+ *   coding?: Record<string, unknown>,
+ *   review?: Record<string, unknown>,
+ * }} [opts]
  */
 export async function runDevSimOrchestrate(prompt, opts = {}) {
-  const url = `${API_PREFIX}/api/orchestrate`;
   const expectedOneTime = Math.max(0, Number(opts.expectedOneTime) || 0);
   const expectedMonthly = Math.max(0, Number(opts.expectedMonthly) || 0);
+  const body = {
+    prompt,
+    expected_one_time: expectedOneTime,
+    expected_monthly: expectedMonthly,
+  };
+  if (opts.coding && opts.review) {
+    body.coding = opts.coding;
+    body.review = opts.review;
+  }
+  const url = `${API_PREFIX}/api/orchestrate`;
   const res = await fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      prompt,
-      expected_one_time: expectedOneTime,
-      expected_monthly: expectedMonthly,
-    }),
+    body: JSON.stringify(body),
   });
   let data = {};
   try {

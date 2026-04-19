@@ -3,7 +3,7 @@ import {
   state, subscribe, openModal, closeModal, leadershipLabel, recomputeBurn, pushTick, toast,
   computeTeamStatsSumForTycoon, applyEconomyLedgerSnapshot,
 } from '../state/store.js';
-import { ROLE_LABELS, ROLE_SHORT } from '../data/personas.js';
+import { AGENT_KIND_LABELS, ROLE_LABELS, ROLE_SHORT } from '../data/personas.js';
 import { TYCOON_TECH_KEYS } from '../data/tycoonRubric.js';
 import { LEVERS, ACHIEVEMENTS } from '../data/events.js';
 import {
@@ -193,7 +193,8 @@ function renderRoster() {
 
     const mid = el('div');
     mid.appendChild(el('div', 'roster-name', a.displayName));
-    mid.appendChild(el('div', 'roster-role', `${ROLE_SHORT[a.role]} | ${a.seniority}`));
+    const kind = a.agentKind ? `${AGENT_KIND_LABELS[a.agentKind] || a.agentKind} · ` : '';
+    mid.appendChild(el('div', 'roster-role', `${kind}${ROLE_SHORT[a.role] || a.role} | ${a.seniority}`));
     card.appendChild(mid);
 
     const meters = el('div', 'roster-meters');
@@ -454,7 +455,7 @@ function renderAgentCardModal(root, agentId) {
   const right = el('div');
   right.innerHTML = `
     <div class="persona-name">${escapeHtml(a.displayName)}${a.fired ? ' <span style="color:var(--bad);font-size:12px">[FIRED]</span>' : ''}</div>
-    <div class="persona-role">${ROLE_LABELS[a.role]} | ${a.seniority} | ${a.yearsExperience}y exp | $${a.salary.toLocaleString()}/mo</div>
+    <div class="persona-role">${a.agentKind ? escapeHtml(AGENT_KIND_LABELS[a.agentKind] || a.agentKind) + ' · ' : ''}${escapeHtml(ROLE_LABELS[a.role] || a.role)} | ${a.seniority} | ${a.yearsExperience}y exp | $${a.salary.toLocaleString()}/mo</div>
     <div class="persona-bio">${escapeHtml(a.bio)}</div>
     <div class="chip-row">
       ${a.traits.map(t => `<span class="chip trait">${escapeHtml(t)}</span>`).join('')}
@@ -732,12 +733,26 @@ function renderCandidatePickerModal(root, firedId) {
   const fired = state.team.find(a => a.id === firedId);
   if (!fired) return;
   const body = el('div');
+  const pool = state.candidatePool;
+  if (!pool.length) {
+    body.innerHTML = `<p style="color:var(--ink-1);margin:0 0 16px">
+      <b>${escapeHtml(fired.displayName)}</b> has left the company.
+      There is no candidate pool (the live team is exactly the two dev-sim agents). Run short-handed or reload after restoring the API roster.
+    </p>`;
+    const skip = el('button', 'btn', 'Continue >');
+    skip.addEventListener('click', () => {
+      closeModal();
+      if (state.sprint.phase === 'review') advanceToNextSprint();
+    });
+    root.appendChild(modalShell('Team change', body, skip));
+    return;
+  }
+
   body.innerHTML = `<p style="color:var(--ink-1);margin:0 0 16px">
     <b>${escapeHtml(fired.displayName)}</b> has left the company.
     The system surfaces <b>3 candidates</b> deliberately weighted to contrast -- high contrast, moderate, and a wildcard.
   </p>`;
 
-  const pool = state.candidatePool;
   const sameRole = pool.filter(c => c.role === fired.role);
   const others = pool.filter(c => c.role !== fired.role);
   const ranked = [...sameRole, ...others];
@@ -1038,15 +1053,14 @@ function renderAgentsHelpModal(root) {
   const body = el('div');
   body.innerHTML = `
     <p style="color:var(--ink-1);font-size:12px;margin-top:0;line-height:1.55">
-      CEO prompts are sent to the <strong>dev_sim_bridge</strong> HTTP service, which runs the same flow as
-      <code>python -m dev_sim.orchestrate</code> (Claude coding agent → K2 PR review → optional follow-up).
-      Ending a sprint calls <code>POST /api/simulate</code> to sync cash, MRR, valuation, and tech debt with the Python tycoon ledger.
-      On load the HUD calls <code>GET /api/economy</code> for the same file-backed ledger. CEO chat can include
-      <b>expected one-time</b> and <b>expected monthly</b> revenue; when the agent ships, one-time hits cash immediately in Python
-      and monthly is queued for the <b>next</b> sprint settlement.
-      Put secrets in <code>.dev-sim/.env</code> (loaded first) or <code>.env</code> at the repo root — same keys as
-      <code>ANTHROPIC_API_KEY</code>, <code>GITHUB_TOKEN</code>, <code>K2_API_KEY</code> (or <code>OPENAI_API_KEY</code> for K2 proxies),
-      plus optional <code>TARGET_GITHUB_REPO</code>. The bridge loads these before any agent runs.
+      CEO prompts are sent to the <strong>dev_sim_bridge</strong> HTTP service, which runs
+      <code>dev-sim-run</code>-style flow: <strong>planning</strong> splits the CEO ask into sprints, then each sprint runs
+      Claude coding → K2 PR review → optional follow-up.
+      Ending a game sprint calls <code>POST /api/simulate</code> to sync cash, MRR, valuation, and tech debt with the Python ledger;
+      on load the HUD uses <code>GET /api/economy</code>. CEO chat can include <b>expected one-time</b> and <b>expected monthly</b>
+      revenue; one-time hits cash when the agent ships, monthly is applied on the <b>next</b> ledger settlement.
+      Put secrets in <code>.dev-sim/.env</code> (loaded first) or <code>.env</code> at the repo root —
+      <code>ANTHROPIC_API_KEY</code>, <code>GITHUB_TOKEN</code>, <code>K2_API_KEY</code>, plus optional <code>TARGET_GITHUB_REPO</code>.
     </p>
     <pre style="font-size:11px;background:var(--panel);padding:12px;border-radius:8px;overflow:auto;line-height:1.45">
 # Terminal 1 — from repo root
@@ -1092,7 +1106,7 @@ export function initHud() {
   qs('#btn-end-sprint').addEventListener('click', () => {
     if (state.modal) return;
     if (state.sprint.phase === 'planning') startSprint();
-    else if (state.sprint.phase === 'execution') void endSprint();
+    else if (state.sprint.phase === 'execution') void endSprint().catch(() => {});
     else if (state.sprint.phase === 'review') advanceToNextSprint();
   });
 

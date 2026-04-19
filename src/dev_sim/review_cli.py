@@ -65,13 +65,13 @@ def main() -> None:
         "--progress-log",
         type=Path,
         default=None,
-        help="Append progress log here (default: ./dev-sim-review-progress.log)",
+        help="Append progress log here (default: ./.dev-sim-workspace/dev-sim-agents-progress.log)",
     )
     p.add_argument(
         "--progress-interval",
         type=float,
-        default=10.0,
-        help="Seconds between progress announcements (default: 10)",
+        default=30.0,
+        help="Seconds between progress announcements (default: 30)",
     )
     args = p.parse_args()
 
