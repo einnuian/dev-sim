@@ -1,0 +1,14 @@
+# Python bytecode / cache
+__pycache__/
+*.py[cod]
+*$py.class
+
+.env
+
+.dev-sim-workspace/
+
+.venv/
+
+repo-registry.json
+
+tests/

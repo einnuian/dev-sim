@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DevTeam Simulator — CEO Mode</title>
+    <script>
+      window.addEventListener("error", (event) => {
+        if (event.target instanceof Element) return;
+        const errorInfo = {
+          type: "scriptError",
+          timestamp: Date.now().toString(),
+          message: event.error?.message || event.message,
+          stack: event.error?.stack || "No stack trace",
+          source: window.location.href,
+        };
+        sendErrorViaPostMessage(errorInfo);
+      });
+      window.addEventListener("unhandledrejection", (event) => {
+        const errorInfo = {
+          type: "unhandledRejection",
+          timestamp: Date.now().toString(),
+          message: event.reason?.message || String(event.reason),
+          stack: event.reason?.stack || "No stack trace",
+          source: window.location.href,
+        };
+        sendErrorViaPostMessage(errorInfo);
+      });
+      const originalConsoleError = console.error;
+      console.error = function (...args) {
+        originalConsoleError.apply(console, args);
+        const errorInfo = args.map((arg) => ({
+          type: "consoleError",
+          timestamp: Date.now().toString(),
+          source: window.location.href,
+          message: arg instanceof Error ? arg.message : arg.toString(),
+          stack: arg instanceof Error ? arg.stack : null,
+        }));
+        sendErrorViaPostMessage(errorInfo);
+      };
+      function sendErrorViaPostMessage(errorInfo) {
+        window.parent.postMessage(
+          { type: "adventureGameError", data: errorInfo },
+          "*"
+        );
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="stage" aria-label="DevTeam Simulator office"></canvas>
+
+    <!-- TOP BAR: company HUD -->
+    <header id="topbar" class="hud">
+      <div class="brand">
+        <span class="logo">[ ]</span>
+        <div>
+          <div class="company-name">DevTeam Sim Inc.</div>
+          <div class="tagline" id="tagline">Day 1 · Sprint 1 · Planning</div>
+        </div>
+      </div>
+      <div class="stats">
+        <div class="stat" title="Cash on hand">
+          <div class="stat-label">CASH</div>
+          <div class="stat-value" id="stat-cash">$0</div>
+        </div>
+        <div class="stat" title="Sprints until bankruptcy">
+          <div class="stat-label">RUNWAY</div>
+          <div class="stat-value" id="stat-runway">— sprints</div>
+        </div>
+        <div class="stat" title="Burn rate per sprint">
+          <div class="stat-label">BURN</div>
+          <div class="stat-value" id="stat-burn">$0</div>
+        </div>
+        <div class="stat" title="Monthly recurring revenue">
+          <div class="stat-label">MRR</div>
+          <div class="stat-value" id="stat-mrr">$0</div>
+        </div>
+        <div class="stat" title="Tech debt">
+          <div class="stat-label">TECH DEBT</div>
+          <div class="stat-value" id="stat-debt">0%</div>
+        </div>
+        <div class="stat" title="Public reputation">
+          <div class="stat-label">REPUTATION</div>
+          <div class="stat-value" id="stat-rep">50</div>
+        </div>
+        <div class="stat" title="Your leadership style">
+          <div class="stat-label">LEADERSHIP</div>
+          <div class="stat-value" id="stat-style">Neutral</div>
+        </div>
+      </div>
+      <div class="controls">
+        <button id="btn-pause" class="btn btn-ghost">|| Pause</button>
+        <button id="btn-speed" class="btn btn-ghost">&gt;&gt; 1x</button>
+        <button id="btn-end-sprint" class="btn btn-primary">End Sprint &gt;</button>
+      </div>
+    </header>
+
+    <!-- LEFT: roster + ticker -->
+    <aside id="leftpanel" class="hud">
+      <div class="panel">
+        <div class="panel-title">TEAM ROSTER</div>
+        <div id="roster"></div>
+      </div>
+      <div class="panel grow">
+        <div class="panel-title">LIVE FEED</div>
+        <div id="ticker"></div>
+      </div>
+    </aside>
+
+    <!-- RIGHT: sprint board + PR feed -->
+    <aside id="rightpanel" class="hud">
+      <div class="panel">
+        <div class="panel-title">SPRINT BOARD</div>
+        <div id="board"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">PULL REQUESTS</div>
+        <div id="prfeed"></div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">EVENTS DECK</div>
+        <div id="eventsdeck"></div>
+      </div>
+      <div class="panel grow">
+        <div class="panel-title">GENERATED PROJECTS</div>
+        <div id="projects"></div>
+      </div>
+    </aside>
+
+    <!-- BOTTOM-LEFT: Chat with the team -->
+    <section id="chatdock" class="hud">
+      <div class="chat-head">
+        <span class="chat-title">CEO -&gt; TEAM CHAT</span>
+        <button id="btn-settings" class="btn btn-ghost" style="font-size:10px;padding:4px 8px">Settings</button>
+      </div>
+      <div id="chatlog"></div>
+      <form id="chatform">
+        <input id="chatinput" type="text" autocomplete="off"
+               placeholder="Tell the team what to build... e.g. 'Make me a snake game with a dark theme'" />
+        <button class="btn btn-primary" type="submit">Send &gt;</button>
+      </form>
+    </section>
+
+    <!-- BOTTOM: action toolbar / spend levers -->
+    <footer id="bottombar" class="hud">
+      <div id="leverstrip"></div>
+      <div id="achievements"></div>
+    </footer>
+
+    <!-- floating "Chat with team" toggle -->
+    <button id="chat-toggle">[+] Chat with the team</button>
+
+    <!-- toast notifications -->
+    <div id="toasts" class="hud"></div>
+
+    <!-- modal layer -->
+    <div id="modal-root" class="hud"></div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
