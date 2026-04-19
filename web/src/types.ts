@@ -55,10 +55,19 @@ export interface SprintInfo {
   day: number
 }
 
-export interface FeedItem {
+/** Backend / orchestration log lines rendered in the group-chat terminal (SSE/WebSocket later). */
+export type BackendLogSide = 'in' | 'out' | 'system'
+
+export interface BackendLogEvent {
   id: string
-  at: string
-  text: string
+  /** Display time, e.g. 09:42:01 */
+  time: string
+  /** Shown as author line under the bubble */
+  author: string
+  body: string
+  side: BackendLogSide
+  /** Optional monospace line (JSON, shell, stack trace snippet) */
+  code?: string
 }
 
 export interface HRScoreRow {

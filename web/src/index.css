@@ -218,7 +218,8 @@ textarea {
 .app-main {
   flex: 1;
   display: grid;
-  grid-template-columns: minmax(240px, 280px) minmax(0, 1fr) minmax(260px, 360px);
+  /* Narrow left rail for terminal + roster; center gets remaining space */
+  grid-template-columns: minmax(200px, 260px) minmax(0, 1fr) minmax(260px, 360px);
   gap: 12px;
   padding: 12px;
   align-items: stretch;
@@ -229,6 +230,31 @@ textarea {
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.col--left {
+  min-height: 0;
+  max-width: 260px;
+  width: 100%;
+}
+
+.col--left .gct {
+  flex: 1 1 58%;
+  min-height: 220px;
+}
+
+.col--left .roster-panel {
+  flex: 1 1 42%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.col--left .roster-list {
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
 }
 
 .panel {
@@ -309,29 +335,271 @@ textarea {
   border-radius: 2px;
 }
 
-/* Live feed */
-.live-feed {
-  flex: 1;
-  min-height: 120px;
+/* Group chat + terminal (backend log stream) */
+.gct {
   display: flex;
   flex-direction: column;
+  padding: 0;
+  overflow: hidden;
+  background: linear-gradient(180deg, #0e1018 0%, #0a0c12 100%);
 }
 
-.live-feed__scroll {
+.gct__toolbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid var(--border);
+  background: rgba(18, 22, 34, 0.95);
+  flex-shrink: 0;
+}
+
+.gct__toolbar-center {
   flex: 1;
+  text-align: center;
+  min-width: 0;
+}
+
+.gct__channel-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.gct__avatar-row {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.gct__avatar-chip {
+  display: inline-flex;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  line-height: 0;
+  background: #0a0c12;
+}
+
+.gct__avatar-chip canvas {
+  image-rendering: pixelated;
+  display: block;
+}
+
+.gct__icon-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: default;
+  opacity: 0.65;
+}
+
+.gct__icon-btn:not(:disabled) {
+  cursor: pointer;
+  opacity: 1;
+}
+
+.gct__icon-btn:not(:disabled):hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: var(--text);
+}
+
+.gct__stream {
+  flex: 1;
+  min-height: 0;
   overflow: auto;
+  padding: 12px 10px;
+  font-size: 12px;
+  background: linear-gradient(180deg, rgba(26, 29, 40, 0.35) 0%, transparent 120px),
+    #0c0e14;
+}
+
+.gct__empty {
+  margin: 0;
+  padding: 12px 4px;
+}
+
+.gct-row {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 14px;
+  max-width: 100%;
+}
+
+.gct-row--in {
+  align-items: flex-start;
+}
+
+.gct-row--out {
+  align-items: flex-end;
+}
+
+.gct-bubble {
+  max-width: 92%;
+  border-radius: 12px;
+  padding: 8px 10px;
+  line-height: 1.45;
+}
+
+.gct-bubble--in {
+  background: #1e2433;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  color: #dce2ef;
+}
+
+.gct-bubble--out {
+  background: linear-gradient(165deg, #1a4d28, #132a1a);
+  border: 1px solid rgba(162, 255, 0, 0.35);
+  color: #e8ffe8;
+}
+
+.gct-bubble__text {
+  margin: 0;
+}
+
+.gct-bubble__code,
+.gct-sys__code {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: #07080c;
+  border: 1px solid rgba(92, 225, 230, 0.12);
+  font-family: var(--font-ui);
+  font-size: 10px;
+  line-height: 1.4;
+  color: var(--accent-2);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.gct-meta {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.gct-row--out .gct-meta {
+  flex-direction: row-reverse;
+}
+
+.gct-meta__who {
+  font-weight: 500;
+  color: #9aa3b8;
+}
+
+.gct-meta__time {
+  font-variant-numeric: tabular-nums;
+  opacity: 0.85;
+}
+
+.gct-sys {
+  margin-bottom: 12px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px dashed rgba(92, 225, 230, 0.2);
+  background: rgba(8, 12, 18, 0.85);
+  font-family: var(--font-ui);
+  font-size: 11px;
+  line-height: 1.5;
+  color: #b8c0d4;
+}
+
+.gct-sys__time {
+  color: var(--cyan);
+  margin-right: 6px;
+  font-variant-numeric: tabular-nums;
+}
+
+.gct-sys__tag {
+  color: var(--accent);
+  margin-right: 6px;
+  font-weight: 600;
+}
+
+.gct-sys__body {
+  color: #c5cddc;
+}
+
+.gct-sys__code {
+  margin-top: 8px;
+  color: #8fd4a8;
+}
+
+.gct__typing {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  font-size: 10px;
+  color: var(--muted);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-top: 1px solid rgba(255, 255, 255, 0.04);
+  background: rgba(10, 12, 18, 0.9);
+}
+
+.gct__typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0.85;
+  animation: gct-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes gct-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.gct__compose {
+  flex-shrink: 0;
+  display: flex;
+  gap: 8px;
+  align-items: stretch;
+  padding: 8px 10px 10px;
+  border-top: 1px solid var(--border);
+  background: rgba(14, 16, 22, 0.98);
+}
+
+.gct__input {
+  flex: 1;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: #0a0c12;
+  padding: 8px 14px;
   font-size: 12px;
   color: var(--muted);
 }
 
-.feed-line {
-  margin-bottom: 8px;
+.gct__send {
+  width: 40px;
+  border-radius: 50%;
+  border: none;
+  background: linear-gradient(145deg, #2a6fa8, #1e4d7a);
+  color: #fff;
+  font-size: 14px;
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
-.feed-time {
-  color: var(--cyan);
-  margin-right: 8px;
-  font-variant-numeric: tabular-nums;
+.gct__send:not(:disabled) {
+  cursor: pointer;
+  opacity: 1;
 }
 
 .muted {
@@ -507,7 +775,7 @@ textarea {
 .app-footer {
   position: relative;
   padding: 8px 12px 12px;
-  padding-left: 340px;
+  padding-left: 280px;
   border-top: 1px solid var(--border);
   background: rgba(7, 8, 12, 0.96);
 }
@@ -767,6 +1035,10 @@ textarea {
 @media (max-width: 1100px) {
   .app-main {
     grid-template-columns: 1fr;
+  }
+
+  .col--left {
+    max-width: none;
   }
 
   .app-footer {

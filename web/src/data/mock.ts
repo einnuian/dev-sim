@@ -1,7 +1,7 @@
 import type {
   Agent,
+  BackendLogEvent,
   CompanyMetrics,
-  FeedItem,
   HRScoreRow,
   OfficeBuff,
   SprintInfo,
@@ -120,16 +120,44 @@ export const MOCK_TASKS: SprintTask[] = [
   },
 ]
 
-export const MOCK_FEED: FeedItem[] = [
+/** Stub stream — replace with SSE/WebSocket payload from orchestration. */
+export const MOCK_BACKEND_LOG: BackendLogEvent[] = [
   {
-    id: '1',
-    at: '09:42',
-    text: 'Aiko opened PR #12 — eval/parser spike',
+    id: 'l1',
+    time: '09:40:02',
+    author: 'system',
+    body: 'Sprint tick: planning → execution',
+    side: 'system',
+    code: '{ "sprint": 1, "phase": "execution", "repo": "org/calculator" }',
   },
   {
-    id: '2',
-    at: '10:05',
-    text: 'Marcus commented: “let’s keep lexer pure TS for now.”',
+    id: 'l2',
+    time: '09:41:18',
+    author: 'Aiko Mori',
+    body: 'Opened PR #12 — eval/parser spike (branch feat/aiko/CAL-2).',
+    side: 'in',
+  },
+  {
+    id: 'l3',
+    time: '09:42:55',
+    author: 'orchestrator',
+    body: 'Sandbox build passed · lint + typecheck OK',
+    side: 'system',
+    code: '$ pnpm build\n✓ dist in 4.2s',
+  },
+  {
+    id: 'l4',
+    time: '09:44:03',
+    author: 'Marcus Vale',
+    body: 'Left review comment on #12: keep lexer pure TS for now.',
+    side: 'in',
+  },
+  {
+    id: 'l5',
+    time: '09:45:11',
+    author: 'You (CEO)',
+    body: 'Ack — prioritize CAL-1 polish after parser lands.',
+    side: 'out',
   },
 ]
 

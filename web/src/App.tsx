@@ -1,19 +1,16 @@
 import { useCallback, useState } from 'react'
-import { ActionDock } from './components/ActionDock'
+// import { ActionDock } from './components/ActionDock'
 import { AgentCard } from './components/AgentCard'
-import { ChatWidget } from './components/ChatWidget'
+// import { ChatWidget } from './components/ChatWidget'
 import { HeaderBar } from './components/HeaderBar'
-import { HRReviewModal } from './components/HRReviewModal'
-import { LiveFeed } from './components/LiveFeed'
+// import { HRReviewModal } from './components/HRReviewModal'
+import { GroupChatTerminal } from './components/GroupChatTerminal'
 import { OfficeFloor } from './components/OfficeFloor'
 import { SprintBoard } from './components/SprintBoard'
 import { WelcomeModal } from './components/WelcomeModal'
 import {
-  HR_FOOTER_SUMMARY,
   MOCK_AGENTS,
-  MOCK_BUFFS,
-  MOCK_FEED,
-  MOCK_HR_ROWS,
+  MOCK_BACKEND_LOG,
   MOCK_METRICS,
   MOCK_SPRINT,
   MOCK_TASKS,
@@ -21,19 +18,18 @@ import {
 
 export default function App() {
   const [welcomeOpen, setWelcomeOpen] = useState(true)
-  const [hrOpen, setHrOpen] = useState(false)
   const [paused, setPaused] = useState(false)
   const [speed, setSpeed] = useState(1)
   const [selectedAgent, setSelectedAgent] = useState<string | null>(MOCK_AGENTS[0]?.id ?? null)
 
-  const endSprint = useCallback(() => setHrOpen(true), [])
-  const closeHr = useCallback(() => setHrOpen(false), [])
+  /** Stub until HR review flow is re-enabled. */
+  const endSprint = useCallback(() => {}, [])
   const cycleSpeed = useCallback(() => setSpeed((s) => (s >= 4 ? 1 : s * 2)), [])
 
   return (
     <div className="app-shell">
       <WelcomeModal open={welcomeOpen} onStart={() => setWelcomeOpen(false)} />
-      <HRReviewModal
+      {/* <HRReviewModal
         open={hrOpen}
         sprintNumber={MOCK_SPRINT.number}
         agents={MOCK_AGENTS}
@@ -41,7 +37,7 @@ export default function App() {
         summary={HR_FOOTER_SUMMARY}
         onContinue={closeHr}
         onClose={closeHr}
-      />
+      /> */}
 
       <HeaderBar
         metrics={MOCK_METRICS}
@@ -55,6 +51,7 @@ export default function App() {
 
       <div className="app-main">
         <aside className="col col--left">
+          <GroupChatTerminal events={MOCK_BACKEND_LOG} team={MOCK_AGENTS} />
           <section className="panel roster-panel">
             <div className="panel__title">Team roster</div>
             <div className="roster-list">
@@ -68,7 +65,6 @@ export default function App() {
               ))}
             </div>
           </section>
-          <LiveFeed items={MOCK_FEED} />
         </aside>
 
         <main className="col col--center">
@@ -81,8 +77,8 @@ export default function App() {
       </div>
 
       <footer className="app-footer">
-        <ChatWidget />
-        <ActionDock buffs={MOCK_BUFFS} />
+        {/* <ChatWidget /> */}
+        {/* <ActionDock buffs={MOCK_BUFFS} /> */}
       </footer>
     </div>
   )
