@@ -112,13 +112,13 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
         def job() -> dict[str, Any]:
             os.chdir(REPO_ROOT)
-            from dev_sim_bridge.pipeline import run_orchestrate_for_prompt
+            from dev_sim_bridge.pipeline import run_planned_orchestrate_for_prompt
 
             coding_p = body.get("coding") if isinstance(body.get("coding"), dict) else None
             review_p = body.get("review") if isinstance(body.get("review"), dict) else None
 
             try:
-                return run_orchestrate_for_prompt(
+                return run_planned_orchestrate_for_prompt(
                     prompt,
                     repo_root=REPO_ROOT,
                     workspace=workspace,
@@ -143,7 +143,11 @@ def main(host: str = "127.0.0.1", port: int = 8765) -> None:
     os.chdir(REPO_ROOT)
     httpd = ThreadingHTTPServer((host, port), BridgeHandler)
     print(f"dev_sim_bridge listening on http://{host}:{port}", file=sys.stderr)
-    print("  POST /api/orchestrate  JSON {\"prompt\": \"...\"}", file=sys.stderr)
+    print(
+        "  POST /api/orchestrate  JSON {\"prompt\": \"...\"}  "
+        "(plan → sequential sprint orchestrate, same as dev-sim-run)",
+        file=sys.stderr,
+    )
     print("  GET  /api/health", file=sys.stderr)
     print("  GET  /api/agents  optional ?seed=int", file=sys.stderr)
     try:

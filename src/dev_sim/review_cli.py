@@ -70,8 +70,8 @@ def main() -> None:
     p.add_argument(
         "--progress-interval",
         type=float,
-        default=10.0,
-        help="Seconds between progress announcements (default: 10)",
+        default=30.0,
+        help="Seconds between progress announcements (default: 30)",
     )
     args = p.parse_args()
 

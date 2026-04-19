@@ -170,7 +170,7 @@ def main() -> None:
     parser.add_argument("--review-persona-seed", type=int, default=None)
     parser.add_argument("--personas-dir", type=Path, default=None)
     parser.add_argument("--no-agent-progress", action="store_true")
-    parser.add_argument("--progress-interval", type=float, default=10.0)
+    parser.add_argument("--progress-interval", type=float, default=30.0)
     parser.add_argument(
         "--only-sprint",
         type=int,

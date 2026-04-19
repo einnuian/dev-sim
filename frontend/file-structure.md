@@ -37,7 +37,7 @@ frontend/
 │   │   └── events.js          # Event deck, levers, achievements
 │   └── agents/
 │       ├── orchestrator.js    # CEO prompt → dev_sim coding + K2 review (via bridge)
-│       ├── devSimBridge.js      # POST /api/orchestrate → local dev_sim_bridge server
+│       ├── devSimBridge.js      # POST /api/orchestrate → bridge (plan + dev-sim-run per sprint)
 │       └── templates.js       # README scaffolding + template metadata
 ├── developer.md
 └── designer.md

@@ -1007,7 +1007,7 @@ def run_coding_agent(
     persona_dict: dict[str, Any] | None = None,
     agent_progress: bool = True,
     progress_log_path: Path | None = None,
-    progress_interval_sec: float = 10.0,
+    progress_interval_sec: float = 30.0,
 ) -> dict[str, Any]:
     load_env()
     api_key = get_anthropic_api_key()

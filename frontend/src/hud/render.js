@@ -763,7 +763,7 @@ function renderAgentsHelpModal(root) {
   body.innerHTML = `
     <p style="color:var(--ink-1);font-size:12px;margin-top:0;line-height:1.55">
       CEO prompts are sent to the <strong>dev_sim_bridge</strong> HTTP service, which runs the same flow as
-      <code>python -m dev_sim.orchestrate</code> (Claude coding agent → K2 PR review → optional follow-up).
+      <code>dev-sim-run</code> (planning → per sprint: Claude coding agent → K2 PR review → optional follow-up).
       Configure <code>ANTHROPIC_API_KEY</code>, <code>GITHUB_TOKEN</code>, and <code>K2_API_KEY</code> in a <code>.env</code>
       file at the repository root — not in this UI.
     </p>

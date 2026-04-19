@@ -153,7 +153,7 @@ class ProgressAnnouncer:
         persona: dict[str, Any] | None,
         *,
         agent_label: str,
-        interval_sec: float = 10.0,
+        interval_sec: float = 30.0,
     ) -> None:
         self._plog = logger
         self._persona = persona

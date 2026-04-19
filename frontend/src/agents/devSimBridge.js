@@ -1,6 +1,7 @@
 /**
- * Calls the local dev_sim_bridge HTTP server, which runs ``dev_sim`` coding + K2 review
- * (same flow as ``python -m dev_sim.orchestrate``). Vite proxies ``/api`` → port 8765 in dev/preview.
+ * Calls the local dev_sim_bridge HTTP server: planning (``run_planning_agent``) then
+ * one coding → K2 → follow-up pass per planned sprint (same as ``dev-sim-run``).
+ * Vite proxies ``/api`` → port 8765 in dev/preview.
  */
 
 const API_PREFIX = (import.meta.env.VITE_DEV_SIM_API || '').replace(/\/$/, '');

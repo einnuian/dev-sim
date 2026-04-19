@@ -22,7 +22,137 @@ from dev_sim.personas_bridge import (
     persona_slice_review,
     review_persona_bundle,
 )
+from dev_sim.planner import run_planning_agent
 from dev_sim.review_agent import compute_k2_pr_review, post_pr_issue_comment
+
+
+def run_planned_orchestrate_for_prompt(
+    text: str,
+    *,
+    repo_root: Path,
+    workspace: Path | None = None,
+    repo_registry: Path | None = None,
+    max_turns: int = 24,
+    followup_max_turns: int = 24,
+    max_diff_chars: int = 200_000,
+    always_followup: bool = False,
+    no_review_comment: bool = False,
+    no_agent_progress: bool = True,
+    progress_interval_sec: float = 30.0,
+    coding_persona: dict[str, Any] | None = None,
+    review_persona: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """
+    Same env checks as ``run_orchestrate_for_prompt``, then ``run_planning_agent``,
+    then one full orchestrate pass per planned sprint (sequential, shared workspace).
+
+    On success, top-level ``lastPr`` / ``review`` / ``verdict`` / ``codingPass1`` / etc.
+    reflect the **final** sprint so the CEO UI stays compatible. ``sprintResults`` lists
+    each sprint; ``plannedSprints`` lists ``number`` and ``title`` only (compact).
+    """
+    load_env()
+    t = (text or "").strip()
+    if not t:
+        return {"ok": False, "error": "Prompt is empty."}
+    if not get_anthropic_api_key():
+        return {"ok": False, "error": "ANTHROPIC_API_KEY is not set (needed for planning and coding)."}
+    if not (get_github_token() or "").strip():
+        return {"ok": False, "error": "GITHUB_TOKEN is not set (needed for PRs and review)."}
+    if not get_k2_api_key():
+        return {"ok": False, "error": "K2_API_KEY is not set (needed for K2 PR review)."}
+
+    try:
+        sprints = run_planning_agent(t, model=None, planning_prompt_path=None)
+    except Exception as e:  # noqa: BLE001 — return to UI
+        return {"ok": False, "error": f"Planning failed: {e}"}
+
+    if not sprints:
+        return {"ok": False, "error": "Planner returned no sprints."}
+
+    planned_sprints: list[dict[str, Any]] = []
+    for s in sprints:
+        planned_sprints.append(
+            {
+                "number": s.get("number"),
+                "title": s.get("title"),
+            }
+        )
+
+    sprint_results: list[dict[str, Any]] = []
+    last_payload: dict[str, Any] | None = None
+
+    for sprint in sprints:
+        sprompt = (sprint.get("prompt") or "").strip()
+        if not sprompt:
+            err = f"Sprint {sprint.get('number', '?')} has an empty prompt."
+            sprint_results.append(
+                {
+                    "number": sprint.get("number"),
+                    "title": sprint.get("title"),
+                    "ok": False,
+                    "error": err,
+                }
+            )
+            return {
+                "ok": False,
+                "error": err,
+                "plannedSprints": planned_sprints,
+                "sprintResults": sprint_results,
+            }
+
+        r = run_orchestrate_for_prompt(
+            sprompt,
+            repo_root=repo_root,
+            workspace=workspace,
+            repo_registry=repo_registry,
+            max_turns=max_turns,
+            followup_max_turns=followup_max_turns,
+            max_diff_chars=max_diff_chars,
+            always_followup=always_followup,
+            no_review_comment=no_review_comment,
+            no_agent_progress=no_agent_progress,
+            progress_interval_sec=progress_interval_sec,
+            coding_persona=coding_persona,
+            review_persona=review_persona,
+        )
+
+        entry: dict[str, Any] = {
+            "number": sprint.get("number"),
+            "title": sprint.get("title"),
+            "ok": bool(r.get("ok")),
+            "error": r.get("error"),
+            "lastPr": r.get("lastPr"),
+            "review": r.get("review"),
+            "verdict": r.get("verdict"),
+            "reviewRawOk": r.get("reviewRawOk"),
+            "postedReviewCommentUrl": r.get("postedReviewCommentUrl"),
+            "followUpSkipped": r.get("followUpSkipped"),
+            "codingPass1": r.get("codingPass1"),
+            "codingPass2": r.get("codingPass2"),
+        }
+        sprint_results.append(entry)
+
+        if not r.get("ok"):
+            out: dict[str, Any] = {
+                "ok": False,
+                "error": r.get("error") or "Sprint orchestration failed.",
+                "plannedSprints": planned_sprints,
+                "sprintResults": sprint_results,
+            }
+            if last_payload is not None:
+                out["lastPr"] = last_payload.get("lastPr")
+                out["review"] = last_payload.get("review")
+                out["verdict"] = last_payload.get("verdict")
+            return out
+
+        last_payload = r
+
+    assert last_payload is not None
+    merged: dict[str, Any] = {**last_payload}
+    merged["ok"] = True
+    merged["plannedSprints"] = planned_sprints
+    merged["sprintResults"] = sprint_results
+    return merged
 
 
 def run_orchestrate_for_prompt(
@@ -37,7 +167,7 @@ def run_orchestrate_for_prompt(
     always_followup: bool = False,
     no_review_comment: bool = False,
     no_agent_progress: bool = True,
-    progress_interval_sec: float = 10.0,
+    progress_interval_sec: float = 30.0,
     coding_persona: dict[str, Any] | None = None,
     review_persona: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
