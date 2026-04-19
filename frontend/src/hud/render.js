@@ -8,7 +8,7 @@ import { AGENT_KIND_LABELS, ROLE_LABELS, ROLE_SHORT } from '../data/personas.js'
 import { TYCOON_TECH_KEYS } from '../data/tycoonRubric.js';
 import { LEVERS, ACHIEVEMENTS } from '../data/events.js';
 import {
-  startSprint, endSprint, advanceToNextSprint, planSprint, resetSimHudThrottle,
+  startSprint, advanceToNextSprint, planSprint, resetSimHudThrottle,
   actionPraise, actionCriticize, actionCoach, actionRaise, actionFire, actionHire,
 } from '../sim/engine.js';
 import { makePortraitDataURL } from '../draw/portrait.js';
@@ -219,17 +219,6 @@ function renderTopBar() {
     debtWrap.classList.toggle('stat-debt-crisis', debtPct > 80);
   }
   document.body.classList.toggle('td-crisis', debtPct > 80);
-
-  const endSprintBtn = qs('#btn-end-sprint');
-  if (endSprintBtn) {
-    const showSprintBtn = state.sprint.phase !== 'planning';
-    endSprintBtn.style.display = showSprintBtn ? '' : 'none';
-    if (showSprintBtn) {
-      endSprintBtn.textContent =
-        state.sprint.phase === 'execution' ? 'End Sprint >' : 'Next Sprint >';
-      endSprintBtn.disabled = !!state.ui.sprintDrivenByOrchestrate;
-    }
-  }
 
   renderSprintLedgerStrip();
 
@@ -722,8 +711,10 @@ function modalRenderSignature() {
         return `agent-card:${payload?.agentId ?? ''}`;
       case 'candidate-picker':
         return `candidate-picker:${payload?.firedId ?? ''}`;
-      case 'hr-review':
-        return `hr-review:${JSON.stringify(payload?.scores ?? {})}`;
+      case 'hr-review': {
+        const rows = Array.isArray(payload?.scores) ? payload.scores : [];
+        return `hr-review:${rows.map((s) => `${s.agentId}:${s.total}:${s.flag ?? ''}`).join('|')}`;
+      }
       case 'project': {
         const id = payload?.projectId;
         const proj = (state.projects || []).find((x) => x.id === id);
@@ -818,14 +809,9 @@ function renderIntroModal(root) {
       <div><b>BYO LLM</b> Plug in OpenAI/Groq/OpenRouter for in-character agents and smarter code, or use the built-in template engine.</div>
     </div>
     <p style="color:var(--ink-2);font-size:11px">Tip: Click any agent (sprite or roster card) for their persona, meters, and action wheel.</p>
+    <p style="color:var(--ink-2);font-size:11px;margin-top:8px">Close this dialog (X) to begin Sprint 1.</p>
   `;
-  const footBtn = el('button', 'btn btn-primary', 'Start Day 1 >');
-  footBtn.addEventListener('click', () => {
-    closeModal();
-    planSprint();
-    startSprint();
-  });
-  root.appendChild(modalShell('Welcome, CEO', body, footBtn));
+  root.appendChild(modalShell('Welcome, CEO', body, null));
 }
 
 function renderAgentCardModal(root, agentId) {
@@ -1132,18 +1118,25 @@ function renderHRReviewModal(root, scores) {
 
   const foot = el('div');
   foot.style.cssText = 'display:flex;gap:8px;align-items:center;flex-wrap:wrap';
-  const flagged = scores.filter(s => s.flag === 'underperformer');
-  if (flagged.length) {
+  const live = (state.team || []).filter((a) => !a.fired);
+  const scoreById = new Map(scores.map((s) => [s.agentId, s]));
+  if (live.length) {
     const sel = el('select');
     sel.style.cssText = 'padding:8px;background:var(--bg-2);color:var(--ink-0);border:1px solid var(--line);border-radius:6px;font-family:inherit';
-    sel.innerHTML = '<option value="">Fire flagged agent...</option>' +
-      flagged.map(s => {
-        const a = state.team.find(x => x.id === s.agentId);
-        return `<option value="${s.agentId}">${a.displayName} (${s.total})</option>`;
-      }).join('');
+    sel.appendChild(new Option('Let someone go (opens replacement hire)…', ''));
+    for (const a of live) {
+      const sc = scoreById.get(a.id);
+      const tag =
+        sc?.flag === 'underperformer' ? ' · at risk' : sc?.flag === 'star' ? ' · star' : '';
+      const scTxt = sc ? ` · score ${sc.total}` : '';
+      sel.appendChild(new Option(`${a.displayName}${scTxt}${tag}`, a.id));
+    }
     foot.appendChild(sel);
-    const fireBtn = el('button', 'btn btn-bad', 'Fire X');
-    fireBtn.addEventListener('click', () => { if (sel.value) actionFire(sel.value); });
+    const fireBtn = el('button', 'btn btn-bad', 'Let go & hire >');
+    fireBtn.addEventListener('click', () => {
+      if (!sel.value) return;
+      actionFire(sel.value);
+    });
     foot.appendChild(fireBtn);
   }
   const cont = el('button', 'btn btn-primary', 'Continue >');
@@ -1653,13 +1646,6 @@ export function initHud() {
       downloadLedgerStatement();
     });
   }
-
-  qs('#btn-end-sprint')?.addEventListener('click', () => {
-    if (state.modal) return;
-    if (state.ui.sprintDrivenByOrchestrate) return;
-    if (state.sprint.phase === 'execution') void endSprint().catch(() => {});
-    else if (state.sprint.phase === 'review') advanceToNextSprint();
-  });
 
   qs('#btn-restart-game')?.addEventListener('click', () => {
     if (_restartInProgress) return;

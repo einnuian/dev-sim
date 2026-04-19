@@ -58,6 +58,56 @@ function buildBio(p) {
  * @param {object} persona - snake_case dict from ``GET /api/agents``
  * @param {'coding'|'coding_b'|'review'} agentKind
  */
+const BENCH_FIRST = ['Jordan', 'Riley', 'Morgan', 'Casey', 'Quinn', 'Avery', 'Skyler', 'Reese'];
+const BENCH_LAST = ['Nguyen', 'Patel', 'Garcia', 'Okafor', 'Silva', 'Kim', 'Bak', 'Liu'];
+const BENCH_ROLES = ['frontend', 'backend', 'tech_lead', 'frontend', 'backend', 'tech_lead', 'frontend', 'backend'];
+
+/**
+ * Synthetic roster candidates when no HR pool file exists (API-only team).
+ * @returns {object[]}
+ */
+export function buildSyntheticCandidatePool() {
+  const stamp = Date.now();
+  return BENCH_ROLES.map((role, i) => {
+    const id = `bench-${stamp}-${i}`;
+    const displayName = `${BENCH_FIRST[i % BENCH_FIRST.length]} ${BENCH_LAST[i % BENCH_LAST.length]}`;
+    const seniority = i % 3 === 0 ? 'junior' : i % 3 === 1 ? 'mid' : 'senior';
+    const salary = SENIORITY_SALARY[seniority] ?? 12000;
+    const idKey = `${id}-${role}`;
+    const traitSets = [
+      ['curious', 'pragmatic'],
+      ['meticulous', 'quiet'],
+      ['chaotic_good', 'fast'],
+      ['skeptical', 'mentor'],
+      ['optimist', 'detail_oriented'],
+      ['pragmatic', 'shipping_first'],
+      ['deep_diver', 'patient'],
+      ['direct', 'systems_thinker'],
+    ];
+    return {
+      id,
+      displayName,
+      role,
+      seniority,
+      yearsExperience: 2 + (hashStr(id) % 10),
+      salary,
+      preferredStack: role === 'frontend' ? ['React', 'TypeScript'] : role === 'backend' ? ['Rust', 'Go'] : ['Systems', 'APIs'],
+      dislikedStack: [],
+      traits: traitSets[i % traitSets.length],
+      workStyle: i % 2 === 0 ? 'heads_down' : 'pairing_heavy',
+      communicationStyle: i % 3 === 0 ? 'direct' : i % 3 === 1 ? 'diplomatic' : 'async_first',
+      quirks: '',
+      strengths: ['Ships on time', 'Clear writing'],
+      weaknesses: ['Needs context on legacy code'],
+      bio: 'Bench candidate surfaced for replacement hire.',
+      portrait: portraitFromId(idKey),
+      tint: tintFromId(idKey),
+      skills: defaultSkills(role),
+      gitIdentity: null,
+    };
+  });
+}
+
 export function agentFromBackendPersona(persona, agentKind) {
   const role = persona.role;
   const seniority = persona.seniority || 'mid';

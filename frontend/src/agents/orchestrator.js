@@ -535,6 +535,7 @@ export async function runProject(prompt) {
   const avgTechnical = averageTechnicalScores(rubricForHud);
   const usedSyntheticRubric = !mergedScores || !Object.keys(mergedScores).length;
   openModal('k2-audit', {
+    _runLedgerAfterClose: true,
     technicalScores: { ...rubricForHud },
     avgTechnical,
     approved: review.score >= 50,

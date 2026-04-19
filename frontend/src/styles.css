@@ -1004,8 +1004,16 @@ body.td-crisis {
 @keyframes toastOut { to { opacity: 0; transform: translateY(-8px); } }
 
 /* ---------- modals ---------- */
-#modal-root { inset: 0; display: none; align-items: center; justify-content: center;
-  background: rgba(0,0,0,.6); backdrop-filter: blur(4px); }
+#modal-root {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0,0,0,.6);
+  backdrop-filter: blur(4px);
+}
 #modal-root.open { display: flex; pointer-events: auto; }
 .modal {
   background: var(--bg-1);

@@ -13,6 +13,7 @@ import {
 } from '../state/store.js';
 import { runTycoonSprint } from '../agents/devSimBridge.js';
 import { ROLE_LABELS } from '../data/personas.js';
+import { buildSyntheticCandidatePool } from '../data/backendPersona.js';
 import { makeStandup, makePRComment, makeRetro, makeQuip, makeCommitMsg, whyDifferent } from '../data/dialogue.js';
 import { EVENT_DECK, ACHIEVEMENTS } from '../data/events.js';
 import { spawnFx } from '../draw/scene.js';
@@ -309,7 +310,7 @@ export function beginOrchestrateSprint() {
   notify();
 }
 
-/** Leave orchestrate-driven execution (returns to planning; does not run HR / tycoon — use End Sprint for that). */
+/** Leave orchestrate-driven execution (returns to planning; does not run HR / tycoon — settlement runs after closing the code-review audit modal). */
 export function endOrchestrateSprint() {
   if (!state.ui.sprintDrivenByOrchestrate) return;
   state.ui.sprintDrivenByOrchestrate = false;
@@ -532,7 +533,9 @@ export function actionFire(agentId) {
   recomputeBurn();
   pushTick('fired', 'CEO', `let ${a.displayName} go.`);
   toast(`${a.displayName} has been let go.`, 'bad');
-  // open candidate picker for the role
+  if (!state.candidatePool.length) {
+    state.candidatePool = buildSyntheticCandidatePool();
+  }
   openModal('candidate-picker', { firedId: a.id });
 }
 
@@ -540,6 +543,7 @@ export function actionHire(candidateId, firedId) {
   const cand = state.candidatePool.find(c => c.id === candidateId);
   if (!cand) return;
   if (state.economy.cash < cand.salary) { toast('Cannot afford signing.', 'bad'); return; }
+  const prev = state.team.find((x) => x.id === firedId);
   // remove from pool
   state.candidatePool = state.candidatePool.filter(c => c.id !== candidateId);
   // pay first salary
@@ -551,6 +555,8 @@ export function actionHire(candidateId, firedId) {
     energy: 90, morale: 70, focus: 80, loyalty: 70, reputation: 50, burnout: 0,
     speaking: { text: 'Excited to be here.', ttl: 4 },
     activity: 'speak', activityTtl: 4, desk: 0, px: 0, py: 0, _officePlaced: false,
+    agentKind: prev?.agentKind,
+    gitIdentity: prev?.gitIdentity ?? cand.gitIdentity ?? null,
   };
   // replace fired slot
   const idx = state.team.findIndex(a => a.id === firedId);

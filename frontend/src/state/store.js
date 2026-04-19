@@ -387,9 +387,34 @@ export function openModal(kind, payload) {
   notify();
 }
 export function closeModal() {
+  const m = state.modal;
+  const runLedgerAfterK2 =
+    m?.kind === 'k2-audit' &&
+    m.payload &&
+    typeof m.payload === 'object' &&
+    /** @type {{ _runLedgerAfterClose?: boolean }} */ (m.payload)._runLedgerAfterClose === true;
+  const wasIntro = m?.kind === 'intro';
   state.modal = null;
   state.paused = false;
   notify();
+  if (runLedgerAfterK2) {
+    // Defer past this ``notify`` tick so the K2 overlay unmounts before ``endSprint`` opens HR.
+    queueMicrotask(() => {
+      import('../sim/engine.js').then((mod) => {
+        void mod.endSprint().catch((err) => {
+          console.error('[simians] sprint settlement after code review', err);
+        });
+      });
+    });
+  } else if (wasIntro) {
+    // First sprint used to start from the welcome footer; begin when the welcome modal closes (X).
+    queueMicrotask(() => {
+      import('../sim/engine.js').then((mod) => {
+        mod.planSprint();
+        mod.startSprint();
+      });
+    });
+  }
 }
 
 /** CEO chat → /api/orchestrate: show Matrix stream overlay on the sprint board. */
