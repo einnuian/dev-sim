@@ -9,8 +9,6 @@ import {
 import { makePortraitDataURL } from '../draw/portrait.js';
 import { whyDifferent } from '../data/dialogue.js';
 import { runProject } from '../agents/orchestrator.js';
-import { getLlmConfig, setLlmConfig, PROVIDERS, isLlmEnabled } from '../agents/llm.js';
-import { getGhConfig, setGhConfig, isGhEnabled, verifyRepo } from '../agents/github.js';
 
 const portraitCache = new Map();
 function portrait(agent, size = 32) {
@@ -217,7 +215,7 @@ function renderModal() {
     case 'newspaper': renderNewspaperModal(root); break;
     case 'game-over': renderGameOverModal(root); break;
     case 'project': renderProjectModal(root, state.modal.payload.projectId); break;
-    case 'settings': renderSettingsModal(root); break;
+    case 'agents-help': renderAgentsHelpModal(root); break;
   }
 }
 
@@ -704,11 +702,14 @@ function renderProjectModal(root, projectId) {
     ghBtn.rel = 'noopener';
     ghBtn.style.textDecoration = 'none';
     foot.appendChild(ghBtn);
-  } else if (p.ghError) {
-    const err = el('div');
-    err.style.cssText = 'color:var(--bad);font-size:11px;align-self:center';
-    err.textContent = `GitHub: ${p.ghError.slice(0, 100)}`;
-    foot.appendChild(err);
+  } else {
+    const errText = p.error || p.ghError;
+    if (errText) {
+      const err = el('div');
+      err.style.cssText = 'color:var(--bad);font-size:11px;align-self:center';
+      err.textContent = String(errText).slice(0, 240);
+      foot.appendChild(err);
+    }
   }
   if (p.html) {
     const dl = el('button', 'btn', 'Download index.html');
@@ -742,185 +743,32 @@ function downloadFile(name, content) {
 }
 function slug(s) { return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, ''); }
 
-function renderSettingsModal(root) {
-  const cfg = getLlmConfig();
-  const ghCfg = getGhConfig();
+function renderAgentsHelpModal(root) {
   const body = el('div');
   body.innerHTML = `
-    <p style="color:var(--ink-1);font-size:12px;margin-top:0">
-      Connect a real LLM and a real GitHub repo. Without an LLM, the team uses
-      a local template engine. Without a GitHub repo, PRs are simulated locally.
-      With both, every game prompt becomes a real PR with branches, commits, README,
-      and review comments — each agent commits under their own identity.
+    <p style="color:var(--ink-1);font-size:12px;margin-top:0;line-height:1.55">
+      CEO prompts are sent to the <strong>dev_sim_bridge</strong> HTTP service, which runs the same flow as
+      <code>python -m dev_sim.orchestrate</code> (Claude coding agent → K2 PR review → optional follow-up).
+      Configure <code>ANTHROPIC_API_KEY</code>, <code>GITHUB_TOKEN</code>, and <code>K2_API_KEY</code> in a <code>.env</code>
+      file at the repository root — not in this UI.
+    </p>
+    <pre style="font-size:11px;background:var(--panel);padding:12px;border-radius:8px;overflow:auto;line-height:1.45">
+# Terminal 1 — from repo root
+python -m dev_sim_bridge
+
+# Terminal 2 — frontend
+cd frontend &amp;&amp; npm run dev
+    </pre>
+    <p style="color:var(--ink-2);font-size:11px;margin-bottom:0">
+      Vite proxies <code>/api</code> to <code>http://127.0.0.1:8765</code>. For a production build served elsewhere, set
+      <code>VITE_DEV_SIM_API</code> to the bridge base URL when building.
     </p>
   `;
-
-  // ----- LLM section -----
-  const llmHead = el('div');
-  llmHead.style.cssText = 'font-size:11px;letter-spacing:2px;color:var(--accent);margin:8px 0 6px;border-bottom:1px solid var(--line);padding-bottom:4px';
-  llmHead.textContent = 'LLM PROVIDER';
-  body.appendChild(llmHead);
-
-  const form = el('form', 'settings-form');
-
-  const provLabel = el('label');
-  provLabel.innerHTML = '<span>Provider</span>';
-  const provSel = el('select');
-  for (const [k, v] of Object.entries(PROVIDERS)) {
-    const opt = document.createElement('option');
-    opt.value = k; opt.textContent = v.label; if (k === cfg.provider) opt.selected = true;
-    provSel.appendChild(opt);
-  }
-  provLabel.appendChild(provSel);
-  form.appendChild(provLabel);
-
-  const keyLabel = el('label');
-  keyLabel.innerHTML = '<span>API Key (stored only in your browser)</span>';
-  const keyInput = el('input');
-  keyInput.type = 'password';
-  keyInput.value = cfg.apiKey || '';
-  keyInput.placeholder = 'sk-... or gsk_... or sk-or-...';
-  keyLabel.appendChild(keyInput);
-  form.appendChild(keyLabel);
-
-  const modelLabel = el('label');
-  modelLabel.innerHTML = '<span>Model (leave blank for provider default)</span>';
-  const modelInput = el('input');
-  modelInput.type = 'text';
-  modelInput.value = cfg.model || '';
-  modelInput.placeholder = 'e.g. gpt-4o-mini';
-  modelLabel.appendChild(modelInput);
-  form.appendChild(modelLabel);
-
-  body.appendChild(form);
-
-  // ----- GitHub section -----
-  const ghHead = el('div');
-  ghHead.style.cssText = 'font-size:11px;letter-spacing:2px;color:var(--accent);margin:18px 0 6px;border-bottom:1px solid var(--line);padding-bottom:4px';
-  ghHead.textContent = 'GITHUB INTEGRATION';
-  body.appendChild(ghHead);
-
-  const ghForm = el('form', 'settings-form');
-
-  const ghEnableLabel = el('label');
-  ghEnableLabel.style.flexDirection = 'row';
-  ghEnableLabel.style.alignItems = 'center';
-  ghEnableLabel.style.gap = '8px';
-  const ghEnable = el('input');
-  ghEnable.type = 'checkbox';
-  ghEnable.checked = !!ghCfg.enabled;
-  const ghEnableText = el('span', '', 'Push real PRs to GitHub');
-  ghEnableLabel.appendChild(ghEnable);
-  ghEnableLabel.appendChild(ghEnableText);
-  ghForm.appendChild(ghEnableLabel);
-
-  const ghTokenLabel = el('label');
-  ghTokenLabel.innerHTML = '<span>Personal Access Token (classic with <code>repo</code> scope, or fine-grained PAT with Contents+PRs read/write)</span>';
-  const ghToken = el('input');
-  ghToken.type = 'password';
-  ghToken.value = ghCfg.token || '';
-  ghToken.placeholder = 'ghp_... or github_pat_...';
-  ghTokenLabel.appendChild(ghToken);
-  ghForm.appendChild(ghTokenLabel);
-
-  const repoRow = el('div');
-  repoRow.style.cssText = 'display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px';
-  const ghOwnerLabel = el('label');
-  ghOwnerLabel.innerHTML = '<span>Owner</span>';
-  const ghOwner = el('input');
-  ghOwner.type = 'text';
-  ghOwner.value = ghCfg.owner || '';
-  ghOwner.placeholder = 'your-github-username';
-  ghOwnerLabel.appendChild(ghOwner);
-  const ghRepoLabel = el('label');
-  ghRepoLabel.innerHTML = '<span>Repo</span>';
-  const ghRepo = el('input');
-  ghRepo.type = 'text';
-  ghRepo.value = ghCfg.repo || '';
-  ghRepo.placeholder = 'devteam-sim-games';
-  ghRepoLabel.appendChild(ghRepo);
-  const ghBranchLabel = el('label');
-  ghBranchLabel.innerHTML = '<span>Base branch</span>';
-  const ghBranch = el('input');
-  ghBranch.type = 'text';
-  ghBranch.value = ghCfg.baseBranch || 'main';
-  ghBranch.placeholder = 'main';
-  ghBranchLabel.appendChild(ghBranch);
-  repoRow.appendChild(ghOwnerLabel);
-  repoRow.appendChild(ghRepoLabel);
-  repoRow.appendChild(ghBranchLabel);
-  ghForm.appendChild(repoRow);
-
-  const verifyRow = el('div');
-  verifyRow.style.cssText = 'display:flex;gap:8px;align-items:center;margin-top:4px';
-  const verifyBtn = el('button', 'btn', 'Test connection');
-  verifyBtn.type = 'button';
-  const verifyMsg = el('span');
-  verifyMsg.style.cssText = 'font-size:11px;color:var(--ink-2)';
-  verifyBtn.addEventListener('click', async () => {
-    setGhConfig({
-      token: ghToken.value.trim(), owner: ghOwner.value.trim(), repo: ghRepo.value.trim(),
-      baseBranch: ghBranch.value.trim() || 'main', enabled: true,
-    });
-    verifyMsg.textContent = 'Checking...';
-    verifyMsg.style.color = 'var(--ink-2)';
-    try {
-      const r = await verifyRepo();
-      verifyMsg.textContent = `OK: ${r.fullName} (default: ${r.defaultBranch})`;
-      verifyMsg.style.color = 'var(--good)';
-      if (!ghBranch.value.trim()) ghBranch.value = r.defaultBranch;
-    } catch (e) {
-      verifyMsg.textContent = e.message.slice(0, 200);
-      verifyMsg.style.color = 'var(--bad)';
-    }
-  });
-  verifyRow.appendChild(verifyBtn);
-  verifyRow.appendChild(verifyMsg);
-  ghForm.appendChild(verifyRow);
-
-  body.appendChild(ghForm);
-
-  const note = el('div', 'settings-note');
-  note.innerHTML = `
-    <b>How real PRs work:</b> the app calls the GitHub REST API directly from your browser using your PAT.
-    A new branch is created, three files are committed (game, README, review notes), each by a different agent identity,
-    then a pull request is opened with review comments.
-    <br><br>
-    <b>Recommended setup:</b> create a brand-new empty repo (e.g. <code>devteam-sim-games</code>) with one commit on <code>main</code> (a README is enough),
-    then point this here. Each generated game lands in its own <code>games/&lt;slug&gt;/</code> folder on its own branch.
-    <br><br>
-    <b>Token scopes:</b> classic PAT needs <code>repo</code>; fine-grained PAT needs Contents (read+write), Pull requests (read+write), Metadata (read) on the repo.
-    <br><br>
-    <b>LLM tips:</b> Groq with <code>llama-3.1-8b-instant</code> is free and very fast. OpenAI <code>gpt-4o-mini</code> is cheap and capable.
-    All keys live only in your browser localStorage and are sent directly to the provider.
-  `;
-  body.appendChild(note);
-
   const foot = el('div');
-  foot.style.cssText = 'display:flex;gap:8px';
-  const save = el('button', 'btn btn-primary', 'Save');
-  save.addEventListener('click', () => {
-    setLlmConfig({ provider: provSel.value, apiKey: keyInput.value.trim(), model: modelInput.value.trim() });
-    setGhConfig({
-      token: ghToken.value.trim(), owner: ghOwner.value.trim(), repo: ghRepo.value.trim(),
-      baseBranch: ghBranch.value.trim() || 'main', enabled: ghEnable.checked,
-    });
-    const llmMsg = provSel.value === 'none' ? 'template engine' : PROVIDERS[provSel.value].label;
-    const ghMsg = ghEnable.checked ? `GitHub PRs to ${ghOwner.value}/${ghRepo.value}` : 'simulated PRs only';
-    toast(`Saved: LLM = ${llmMsg}; ${ghMsg}`, 'good');
-    closeModal();
-  });
-  const clear = el('button', 'btn', 'Clear All');
-  clear.addEventListener('click', () => {
-    setLlmConfig({ provider: 'none', apiKey: '', model: '' });
-    setGhConfig({ token: '', owner: '', repo: '', baseBranch: 'main', enabled: false });
-    closeModal();
-    toast('Cleared. Using local templates and simulated PRs.', 'good');
-  });
-  foot.appendChild(clear);
-  foot.appendChild(save);
-
-  root.appendChild(modalShell('Settings', body, foot));
+  const close = el('button', 'btn btn-primary', 'Close');
+  close.addEventListener('click', closeModal);
+  foot.appendChild(close);
+  root.appendChild(modalShell('Real agents (dev-sim)', body, foot));
 }
 
 function qs(s) { return document.querySelector(s); }
@@ -984,7 +832,7 @@ export function initHud() {
     });
   });
 
-  qs('#btn-settings').addEventListener('click', () => openModal('settings', {}));
+  qs('#btn-agents-help').addEventListener('click', () => openModal('agents-help', {}));
 
   renderAll();
   subscribe(renderAll);

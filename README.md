@@ -38,14 +38,28 @@ impossible to break with package issues during demo day.
 
 ## Run it
 
+From the **`frontend/`** directory (Vite project root):
+
 ```bash
+cd frontend
 pnpm install
 pnpm dev          # Vite dev server
 pnpm build        # production bundle in dist/
 pnpm preview      # serve the prod bundle
 ```
 
-That's it. Open `http://localhost:5173`.
+Open `http://localhost:5173`.
+
+### CEO chat → real `dev_sim` agents
+
+The canvas UI no longer stores LLM or GitHub credentials. To run **Claude coding agent → K2 review → optional follow-up** (same as `python -m dev_sim.orchestrate`), start the small HTTP bridge from the **repository root** in a second terminal:
+
+```bash
+# Repo root — uses .env for ANTHROPIC_API_KEY, GITHUB_TOKEN, K2_API_KEY
+python -m dev_sim_bridge
+```
+
+`npm run dev` proxies `/api` to `http://127.0.0.1:8765`. Use the chat **Agents** button for a short reminder.
 
 ---
 
@@ -124,6 +138,10 @@ src/
     scene.js                    # office room, desks, FX, speech-bubble layer
   hud/
     render.js                   # all DOM panels + modals + radar chart
+  agents/
+    orchestrator.js             # CEO prompt → dev_sim via HTTP bridge
+    devSimBridge.js             # fetch /api/orchestrate
+    templates.js                # README / template metadata
 ```
 
 ## How to land this in the team repo as a major contributor

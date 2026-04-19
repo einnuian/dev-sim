@@ -9,7 +9,11 @@ bash install.sh
 rm -rf dist
 
 echo "[build] Building production bundle..."
-pnpm run build
+if command -v pnpm >/dev/null 2>&1; then
+  pnpm run build
+else
+  npm run build
+fi
 
 echo "[build] Syncing static assets..."
 cp -rf public/* dist/
