@@ -146,6 +146,14 @@
         </div>
       </div>
       <div id="chatlog"></div>
+      <div class="ceo-revenue-row" title="Optional: when the agent ships, one-time hits cash immediately; monthly starts next sprint (Python ledger).">
+        <label class="ceo-rev-label"><span>Expected one-time ($)</span>
+          <input id="chat-expected-onetime" type="number" min="0" step="100" placeholder="0" inputmode="decimal" />
+        </label>
+        <label class="ceo-rev-label"><span>Expected monthly ($)</span>
+          <input id="chat-expected-monthly" type="number" min="0" step="50" placeholder="0" inputmode="decimal" />
+        </label>
+      </div>
       <form id="chatform">
         <input id="chatinput" type="text" autocomplete="off"
                placeholder="Tell the team what to build... e.g. 'Make me a snake game with a dark theme'" />

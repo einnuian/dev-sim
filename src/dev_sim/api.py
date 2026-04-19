@@ -69,6 +69,7 @@ class SprintResponse(BaseModel):
     tech_debt: float
     hype_multiplier: float
     active_mrr: float
+    pending_recurring_mrr: float = 0.0
     burn_rate: float
     sprint_month: int
     status: SettlementStatus

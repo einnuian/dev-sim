@@ -60,15 +60,22 @@ function ensurePositions(viewportW, viewportH) {
   }
 }
 
+function hudTopReservePx() {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue('--hud-topbar-height').trim();
+  const n = parseFloat(raw);
+  return Number.isFinite(n) ? n : 120;
+}
+
 function computeRoom(vw, vh) {
   // pick integer scale that fits room into available space
+  const topR = hudTopReservePx();
   const availW = vw - 320 - 320 - 24; // panels each side
-  const availH = vh - 64 - 88 - 16;
+  const availH = vh - topR - 88 - 16;
   const tile = Math.max(2, Math.floor(Math.min(availW / ROOM_W, availH / ROOM_H)));
   const w = ROOM_W * tile;
   const h = ROOM_H * tile;
   const x = Math.floor((vw - w) / 2);
-  const y = 64 + Math.floor((vh - 64 - 88 - h) / 2);
+  const y = topR + Math.floor((vh - topR - 88 - h) / 2);
   return { x, y, w, h, tile };
 }
 

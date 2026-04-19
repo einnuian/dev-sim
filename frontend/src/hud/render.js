@@ -1,5 +1,8 @@
 // HUD rendering — DOM panels driven by store subscriptions.
-import { state, subscribe, openModal, closeModal, leadershipLabel, recomputeBurn, pushTick, toast } from '../state/store.js';
+import {
+  state, subscribe, openModal, closeModal, leadershipLabel, recomputeBurn, pushTick, toast,
+  computeTeamStatsSumForTycoon, applyEconomyLedgerSnapshot,
+} from '../state/store.js';
 import { ROLE_LABELS, ROLE_SHORT } from '../data/personas.js';
 import { TYCOON_TECH_KEYS } from '../data/tycoonRubric.js';
 import { LEVERS, ACHIEVEMENTS } from '../data/events.js';
@@ -10,6 +13,7 @@ import {
 import { makePortraitDataURL } from '../draw/portrait.js';
 import { whyDifferent } from '../data/dialogue.js';
 import { runProject } from '../agents/orchestrator.js';
+import { fetchEconomyLedger } from '../agents/devSimBridge.js';
 
 const portraitCache = new Map();
 function portrait(agent, size = 32) {
@@ -127,7 +131,9 @@ function kickHudLerpIfNeeded() {
 function renderTopBar() {
   const e = state.economy;
   const sm = typeof e.sprintMonth === 'number' && e.sprintMonth >= 1 ? e.sprintMonth : state.sprint.number;
-  set('tagline', `Ledger mo. ${sm} | Sprint ${state.sprint.number} | ${capitalize(state.sprint.phase)}${state.sprint.phase === 'execution' ? ' | ' + Math.max(0, Math.ceil(state.sprint.duration - state.sprint.elapsed)) + 's left' : ''}`);
+  const pipe = safeNum(e.pendingRecurringMrr, 0);
+  const pipeHint = pipe > 0.5 ? ` · +$${Math.round(pipe).toLocaleString()}/mo → ledger next sprint` : '';
+  set('tagline', `Ledger mo. ${sm} | Sprint ${state.sprint.number} | ${capitalize(state.sprint.phase)}${state.sprint.phase === 'execution' ? ' | ' + Math.max(0, Math.ceil(state.sprint.duration - state.sprint.elapsed)) + 's left' : ''}${pipeHint}`);
   const burnShown = e.lastSettlementBurn != null ? e.lastSettlementBurn : e.burnRate;
   const mrrShown =
     typeof e.activeMrr === 'number' && Number.isFinite(e.activeMrr) ? e.activeMrr : safeNum(e.mrr, 0);
@@ -166,6 +172,8 @@ function renderTopBar() {
   if (topbar) {
     topbar.classList.toggle('hud-sprint-live', state.sprint.phase === 'execution');
     topbar.classList.toggle('hud-sprint-review', state.sprint.phase === 'review');
+    const h = Math.ceil(topbar.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--hud-topbar-height', `${h}px`);
   }
 }
 
@@ -173,6 +181,10 @@ function renderTopBar() {
 function renderRoster() {
   const root = qs('#roster');
   root.innerHTML = '';
+  const sum = computeTeamStatsSumForTycoon();
+  const hint = el('div', 'roster-hint');
+  hint.textContent = `Bridge burn input · team stat sum ${sum} (synced roster → POST /api/simulate)`;
+  root.appendChild(hint);
   for (const a of state.team) {
     const card = el('div', 'roster-card' + (a.fired ? ' fired' : '') + (a.speaking ? ' speaking' : ''));
     const img = el('img', 'roster-portrait');
@@ -1029,6 +1041,9 @@ function renderAgentsHelpModal(root) {
       CEO prompts are sent to the <strong>dev_sim_bridge</strong> HTTP service, which runs the same flow as
       <code>python -m dev_sim.orchestrate</code> (Claude coding agent → K2 PR review → optional follow-up).
       Ending a sprint calls <code>POST /api/simulate</code> to sync cash, MRR, valuation, and tech debt with the Python tycoon ledger.
+      On load the HUD calls <code>GET /api/economy</code> for the same file-backed ledger. CEO chat can include
+      <b>expected one-time</b> and <b>expected monthly</b> revenue; when the agent ships, one-time hits cash immediately in Python
+      and monthly is queued for the <b>next</b> sprint settlement.
       Put secrets in <code>.dev-sim/.env</code> (loaded first) or <code>.env</code> at the repo root — same keys as
       <code>ANTHROPIC_API_KEY</code>, <code>GITHUB_TOKEN</code>, <code>K2_API_KEY</code> (or <code>OPENAI_API_KEY</code> for K2 proxies),
       plus optional <code>TARGET_GITHUB_REPO</code>. The bridge loads these before any agent runs.
@@ -1127,6 +1142,10 @@ export function initHud() {
   });
 
   qs('#btn-agents-help').addEventListener('click', () => openModal('agents-help', {}));
+
+  void fetchEconomyLedger().then((d) => {
+    if (d && d.ok !== false) applyEconomyLedgerSnapshot(d);
+  });
 
   document.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;

@@ -94,7 +94,39 @@ class BridgeHandler(BaseHTTPRequestHandler):
             payload = json.dumps({"ok": True, "service": "dev_sim_bridge"}).encode("utf-8")
             self._send(200, payload)
             return
+        if parsed.path == "/api/economy":
+            self._handle_economy_get()
+            return
         self._send(404, json.dumps({"ok": False, "error": "not found"}).encode("utf-8"))
+
+    def _handle_economy_get(self) -> None:
+        """GET /api/economy — current persisted ledger (``company-state.json``) for UI sync."""
+        path = REPO_ROOT / ".dev-sim" / "company-state.json"
+        if not path.is_file():
+            payload = {
+                "ok": True,
+                "balance": 100_000.0,
+                "active_mrr": 0.0,
+                "pending_recurring_mrr": 0.0,
+                "tech_debt": 0.0,
+                "hype_multiplier": 1.0,
+                "sprint_month": 1,
+                "valuation": 0.0,
+                "source": "defaults",
+            }
+            self._send(200, json.dumps(payload).encode("utf-8"))
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            self._send(500, json.dumps({"ok": False, "error": str(e)}).encode("utf-8"))
+            return
+        if not isinstance(data, dict):
+            self._send(500, json.dumps({"ok": False, "error": "invalid economy file"}).encode("utf-8"))
+            return
+        data.setdefault("pending_recurring_mrr", 0.0)
+        out = {"ok": True, "source": str(path), **data}
+        self._send(200, json.dumps(out).encode("utf-8"))
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
@@ -122,6 +154,20 @@ class BridgeHandler(BaseHTTPRequestHandler):
         ws_raw = body.get("workspace")
         workspace = Path(ws_raw).expanduser() if ws_raw else None
 
+        try:
+            exp_ot = float(body.get("expected_one_time", 0) or 0)
+        except (TypeError, ValueError):
+            self._send(400, json.dumps({"ok": False, "error": "expected_one_time must be a number"}).encode("utf-8"))
+            return
+        try:
+            exp_mo = float(body.get("expected_monthly", 0) or 0)
+        except (TypeError, ValueError):
+            self._send(400, json.dumps({"ok": False, "error": "expected_monthly must be a number"}).encode("utf-8"))
+            return
+        if exp_ot < 0 or exp_mo < 0:
+            self._send(400, json.dumps({"ok": False, "error": "expected returns must be >= 0"}).encode("utf-8"))
+            return
+
         global _current
         if _current is not None and not _current.done():
             self._send(
@@ -139,6 +185,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     prompt,
                     repo_root=REPO_ROOT,
                     workspace=workspace,
+                    expected_one_time=exp_ot,
+                    expected_monthly=exp_mo,
                 )
             except Exception as e:  # noqa: BLE001 — surface to UI
                 return {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -214,6 +262,7 @@ def main(host: str = "127.0.0.1", port: int = 8765) -> None:
         file=sys.stderr,
     )
     print("  GET  /api/health", file=sys.stderr)
+    print("  GET  /api/economy   (company-state.json for HUD sync)", file=sys.stderr)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:

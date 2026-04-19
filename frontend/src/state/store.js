@@ -74,6 +74,8 @@ export const state = {
     lastTechnicalScores: null, // { CodeReadability: 1-10, ... }
     lastSettlementBurn: null, // last POST /api/simulate burn_rate (monthly $)
     lastTycoonStatus: null, // CONTINUE | SERIES_A | BANKRUPT | OUTAGE_SURVIVED
+    /** MRR from shipped CEO products — lands in Python ledger next sprint settlement */
+    pendingRecurringMrr: 0,
   },
   stats: {
     commits: 0, prs: 0, builds: { pass: 0, fail: 0 },
@@ -142,9 +144,40 @@ export function applyTycoonApiResponse(payload) {
   if (typeof payload.sprint_month === 'number') e.sprintMonth = payload.sprint_month;
   if (typeof payload.burn_rate === 'number') e.lastSettlementBurn = payload.burn_rate;
   if (typeof payload.status === 'string') e.lastTycoonStatus = payload.status;
+  const pend =
+    typeof payload.pending_recurring_mrr === 'number'
+      ? payload.pending_recurring_mrr
+      : typeof payload.pendingRecurringMrr === 'number'
+        ? payload.pendingRecurringMrr
+        : null;
+  if (pend != null && Number.isFinite(pend)) e.pendingRecurringMrr = pend;
   if (payload.technical_scores && typeof payload.technical_scores === 'object') {
     e.lastTechnicalScores = { ...payload.technical_scores };
   }
+  notify();
+}
+
+/**
+ * Merge ledger fields from GET /api/economy or orchestrate ``economySnapshot`` (snake_case).
+ * @param {Record<string, unknown>} snap
+ */
+export function applyEconomyLedgerSnapshot(snap) {
+  if (!snap || typeof snap !== 'object' || snap.ok === false) return;
+  const e = state.economy;
+  if (typeof snap.balance === 'number' && Number.isFinite(snap.balance)) e.cash = snap.balance;
+  if (typeof snap.active_mrr === 'number' && Number.isFinite(snap.active_mrr)) {
+    e.activeMrr = snap.active_mrr;
+    e.mrr = snap.active_mrr;
+  }
+  if (typeof snap.pending_recurring_mrr === 'number' && Number.isFinite(snap.pending_recurring_mrr)) {
+    e.pendingRecurringMrr = snap.pending_recurring_mrr;
+  }
+  if (typeof snap.valuation === 'number' && Number.isFinite(snap.valuation)) e.valuation = snap.valuation;
+  if (typeof snap.tech_debt === 'number' && Number.isFinite(snap.tech_debt)) e.techDebt = snap.tech_debt;
+  if (typeof snap.hype_multiplier === 'number' && Number.isFinite(snap.hype_multiplier)) {
+    e.hypeMultiplier = snap.hype_multiplier;
+  }
+  if (typeof snap.sprint_month === 'number' && Number.isFinite(snap.sprint_month)) e.sprintMonth = snap.sprint_month;
   notify();
 }
 

@@ -39,6 +39,40 @@ def _mock_technical_scores() -> dict[str, int]:
     return {k: random.randint(1, 10) for k in TECHNICAL_SCORE_KEYS}
 
 
+def apply_shipped_product_economics(
+    repo_root: Path,
+    *,
+    one_time: float,
+    monthly_mrr: float,
+    label: str = "",
+) -> dict[str, Any]:
+    """Apply CEO-declared revenue when a real product ships (orchestrate success).
+
+    - ``one_time``: credited to ``balance`` immediately.
+    - ``monthly_mrr``: added to ``pending_recurring_mrr``; folded into ``active_mrr`` on the **next**
+      :meth:`~dev_sim.economy.CompanyState.process_sprint_settlement` (end-of-sprint / month tick).
+
+    Persists ``.dev-sim/company-state.json`` under ``repo_root``.
+    """
+    path = Path(repo_root) / DEFAULT_STATE_REL
+    company = _load_company_or_fresh(path)
+    company.balance += max(0.0, float(one_time))
+    company.pending_recurring_mrr = float(company.pending_recurring_mrr) + max(0.0, float(monthly_mrr))
+    company.save_state(path)
+    return {
+        "label": (label or "").strip()[:120],
+        "applied_one_time": max(0.0, float(one_time)),
+        "applied_monthly_pipeline": max(0.0, float(monthly_mrr)),
+        "balance": float(company.balance),
+        "active_mrr": float(company.active_mrr),
+        "pending_recurring_mrr": float(company.pending_recurring_mrr),
+        "valuation": float(company.valuation),
+        "sprint_month": int(company.sprint_month),
+        "tech_debt": float(company.tech_debt),
+        "hype_multiplier": float(company.hype_multiplier),
+    }
+
+
 def run_mock_sprint(
     project_name: str,
     project_spec: str,
@@ -89,6 +123,7 @@ def run_mock_sprint(
         "tech_debt": float(company.tech_debt),
         "hype_multiplier": float(company.hype_multiplier),
         "active_mrr": float(company.active_mrr),
+        "pending_recurring_mrr": float(company.pending_recurring_mrr),
         "burn_rate": burn_rate,
         "sprint_month": int(company.sprint_month),
         "status": status,
@@ -96,6 +131,7 @@ def run_mock_sprint(
 
 
 __all__ = [
+    "apply_shipped_product_economics",
     "company_state_path",
     "run_mock_sprint",
 ]

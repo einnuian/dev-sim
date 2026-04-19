@@ -95,6 +95,8 @@ class CompanyState:
         hype_multiplier: Viral demand modifier applied to gross MRR each settlement.
         sprint_month: 1-based sprint counter advanced after each settlement.
         valuation: Paper valuation (updated each settlement as ``active_mrr * 12 * 10``).
+        pending_recurring_mrr: Contracted MRR from shipped products that **starts next**
+            settlement (game-month), then is folded into ``active_mrr``.
     """
 
     balance: float = 100_000.0
@@ -103,6 +105,7 @@ class CompanyState:
     hype_multiplier: float = 1.0
     sprint_month: int = 1
     valuation: float = 0.0
+    pending_recurring_mrr: float = 0.0
 
     def calculate_monthly_burn(self, agents: list[Any]) -> float:
         """Compute monthly burn before this sprint's revenue.
@@ -181,18 +184,23 @@ class CompanyState:
 
         Steps:
 
-        1. Add ``newly_added_mrr`` to ``active_mrr``.
-        2. Gross recurring revenue this sprint: ``active_mrr * hype_multiplier``.
-        3. If ``tech_debt >= 100``, apply a $25k SLA penalty, reset tech debt to 50.
-        4. Update ``balance`` by ``-burn_rate + revenue``.
-        5. Set ``valuation`` to ``active_mrr * 12 * 10``.
-        6. Increment ``sprint_month``.
+        1. Fold ``pending_recurring_mrr`` (earmarked when CEO products shipped) into ``active_mrr``, then clear it.
+        2. Add ``newly_added_mrr`` to ``active_mrr`` (this sprint's modeled product uplift).
+        3. Gross recurring revenue this sprint: ``active_mrr * hype_multiplier``.
+        4. If ``tech_debt >= 100``, apply a $25k SLA penalty, reset tech debt to 50.
+        5. Update ``balance`` by ``-burn_rate + revenue``.
+        6. Set ``valuation`` to ``active_mrr * 12 * 10``.
+        7. Increment ``sprint_month``.
 
         Returns:
             ``SERIES_A`` if paper valuation reaches $2M+, ``BANKRUPT`` if cash is depleted,
             ``OUTAGE_SURVIVED`` if an outage fired this sprint (and not bankrupt),
             otherwise ``CONTINUE``.
         """
+        pipe = max(0.0, float(self.pending_recurring_mrr))
+        self.active_mrr += pipe
+        self.pending_recurring_mrr = 0.0
+
         self.active_mrr += float(newly_added_mrr)
         revenue = float(self.active_mrr) * float(self.hype_multiplier)
 
@@ -237,6 +245,7 @@ class CompanyState:
             hype_multiplier=float(data.get("hype_multiplier", 1.0)),
             sprint_month=int(data.get("sprint_month", 1)),
             valuation=float(data.get("valuation", 0.0)),
+            pending_recurring_mrr=float(data.get("pending_recurring_mrr", 0.0)),
         )
 
 

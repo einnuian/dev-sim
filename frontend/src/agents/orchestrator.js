@@ -6,7 +6,9 @@
 //
 // Everything emits ticker events and runs against the existing state object.
 
-import { state, pushTick, toast, notify, setOrchestrateBusy, pushMatrixStreamLine, openModal } from '../state/store.js';
+import {
+  state, pushTick, toast, notify, setOrchestrateBusy, pushMatrixStreamLine, openModal, applyEconomyLedgerSnapshot,
+} from '../state/store.js';
 import { averageTechnicalScores } from '../data/tycoonRubric.js';
 import { ROLE_LABELS } from '../data/personas.js';
 import { pickTemplate, buildReadme, describeTemplate } from './templates.js';
@@ -162,11 +164,14 @@ export async function runProject(prompt) {
     return;
   }
 
+  const rev = readCeoRevenueExpectations();
   const project = {
     id: projId, prompt, phase: 'planning',
     createdAt: Date.now(),
     sm: sm.id, coder: coder.id, reviewer: tlead.id, arch: arch.id,
     log: [], html: null, sanitized: null, review: null, prId: null, name: null, readme: null,
+    expectedOneTime: rev.expectedOneTime,
+    expectedMonthly: rev.expectedMonthly,
   };
   state.projects = state.projects || [];
   state.projects.unshift(project);
@@ -174,6 +179,9 @@ export async function runProject(prompt) {
   notify();
 
   emit(project, sm, `Got it. Spinning up ${projId}: "${prompt}"`);
+  if (rev.expectedOneTime > 0 || rev.expectedMonthly > 0) {
+    emit(project, sm, `Economics: +$${rev.expectedOneTime.toLocaleString()} one-time at ship · +$${rev.expectedMonthly.toLocaleString()}/mo starting next ledger sprint.`);
+  }
   await say(sm, 'standup', { yesterday: 'planning', today: `kicking off ${projId}` },
     `${projId} kicking off. ${coder.displayName} on code, ${tlead.displayName} on review.`);
   pushTick('event', sm.displayName, `assigned ${coder.displayName} to ${projId}`);
@@ -193,7 +201,7 @@ export async function runProject(prompt) {
   let api;
   startMatrixStream();
   try {
-    api = await runDevSimOrchestrate(prompt);
+    api = await runDevSimOrchestrate(prompt, rev);
   } catch (e) {
     project.phase = 'done';
     project.error = e?.message || String(e);
@@ -221,6 +229,20 @@ export async function runProject(prompt) {
       fullName: lp.fullName || `${lp.owner}/${lp.repo}`,
       htmlUrl: lp.html_url,
     };
+  }
+
+  const es = api.economySnapshot;
+  if (es && typeof es === 'object' && !es.error) {
+    applyEconomyLedgerSnapshot({ ok: true, ...es });
+    const ap1 = Math.round(Number(es.applied_one_time) || 0);
+    const ap2 = Math.round(Number(es.applied_monthly_pipeline) || 0);
+    if (ap1 > 0 || ap2 > 0) {
+      emit(
+        project,
+        sm,
+        `Python ledger updated: +$${ap1.toLocaleString()} cash now · +$${ap2.toLocaleString()}/mo goes live next sprint settlement.`,
+      );
+    }
   }
 
   const review = reviewFromDevSim(api.review, api.verdict);
@@ -257,6 +279,12 @@ export async function runProject(prompt) {
     : `K2 verdict: ${api.verdict || 'n/a'}`;
   project.readme = buildReadme(project.name, prompt, tplKey, [
     makeAgentNote(sm, `CEO request routed to dev-sim orchestrate: "${prompt.slice(0, 120)}".`),
+    rev.expectedOneTime > 0 || rev.expectedMonthly > 0
+      ? makeAgentNote(
+          sm,
+          `Declared economics: $${rev.expectedOneTime.toLocaleString()} one-time at ship · $${rev.expectedMonthly.toLocaleString()}/mo recurring (next ledger sprint).`,
+        )
+      : null,
     makeAgentNote(coder, `Coding agent completed (stop=${api.codingPass1?.stop || 'n/a'}).`),
     makeAgentNote(tlead, summaryLine),
     api.followUpSkipped
@@ -342,6 +370,11 @@ export async function runProject(prompt) {
   if (tp && tp.ok === true && !tp.skipped && tp.url) {
     toast(`Hackathon export pushed to ${tp.target || 'GitHub'} — ${tp.url}`, 'good');
   }
+
+  const otClear = document.getElementById('chat-expected-onetime');
+  const moClear = document.getElementById('chat-expected-monthly');
+  if (otClear) otClear.value = '';
+  if (moClear) moClear.value = '';
 }
 
 function guessName(prompt, fallback) {
@@ -358,4 +391,17 @@ function emit(project, agent, text) {
   notify();
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
+
+function readCeoRevenueExpectations() {
+  const otEl = document.getElementById('chat-expected-onetime');
+  const moEl = document.getElementById('chat-expected-monthly');
+  const parseMoney = (v) => {
+    const n = parseFloat(String(v ?? '').replace(/,/g, ''));
+    return Number.isFinite(n) && n > 0 ? n : 0;
+  };
+  return {
+    expectedOneTime: parseMoney(otEl?.value),
+    expectedMonthly: parseMoney(moEl?.value),
+  };
+}

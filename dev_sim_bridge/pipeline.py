@@ -27,6 +27,7 @@ from dev_sim.orchestrate import _followup_prompt
 from dev_sim.personas_bridge import coding_persona_bundle, review_persona_bundle
 from dev_sim.push_target_repo import push_workspace_to_target
 from dev_sim.review_agent import compute_k2_pr_review, post_pr_issue_comment
+from dev_sim.tycoon_sprint import apply_shipped_product_economics
 
 
 def run_orchestrate_for_prompt(
@@ -42,6 +43,8 @@ def run_orchestrate_for_prompt(
     no_review_comment: bool = False,
     no_agent_progress: bool = True,
     progress_interval_sec: float = 10.0,
+    expected_one_time: float = 0.0,
+    expected_monthly: float = 0.0,
 ) -> dict[str, Any]:
     """
     Returns a JSON-serializable dict. Never calls ``sys.exit`` (unlike the CLI).
@@ -186,6 +189,20 @@ def run_orchestrate_for_prompt(
     except Exception as e:  # noqa: BLE001 — never fail the orchestrate response
         target_push = {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
+    economy_snapshot: dict[str, Any] | None = None
+    ot = max(0.0, float(expected_one_time or 0.0))
+    mo = max(0.0, float(expected_monthly or 0.0))
+    if ot > 0 or mo > 0:
+        try:
+            economy_snapshot = apply_shipped_product_economics(
+                repo_root,
+                one_time=ot,
+                monthly_mrr=mo,
+                label=project_label,
+            )
+        except Exception as e:  # noqa: BLE001
+            economy_snapshot = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
     return {
         "ok": True,
         "codingPass1": _serialize_run(r1),
@@ -197,6 +214,7 @@ def run_orchestrate_for_prompt(
         "codingPass2": r2_summary,
         "lastPr": _serialize_pr(last_pr),
         "targetPush": target_push,
+        "economySnapshot": economy_snapshot,
     }
 
 

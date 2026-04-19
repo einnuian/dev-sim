@@ -1,6 +1,8 @@
 /* ===== DevTeam Simulator — UI styles ===== */
 :root {
   color-scheme: dark;
+  /* Set from JS after layout so side panels + canvas clear the real header height */
+  --hud-topbar-height: 120px;
   --bg-0: #07090f;
   --bg-1: #0c111c;
   --bg-2: #131a2a;
@@ -54,16 +56,21 @@ canvas#stage {
 
 /* ---------- top bar ---------- */
 #topbar {
-  top: 0; left: 0; right: 0;
-  height: 64px;
-  display: flex;
+  top: 0;
+  left: 0;
+  right: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: auto auto;
+  gap: 8px 12px;
   align-items: center;
-  gap: 16px;
-  padding: 8px 16px;
-  background: linear-gradient(180deg, rgba(7,9,15,0.92), rgba(7,9,15,0.55));
+  padding: 10px 14px 12px;
+  background: linear-gradient(180deg, rgba(7,9,15,0.96), rgba(7,9,15,0.78));
   border-bottom: 1px solid var(--line);
   backdrop-filter: blur(8px);
   transition: border-color 0.35s ease, box-shadow 0.35s ease;
+  overflow: visible;
 }
 #topbar.hud-sprint-live {
   border-bottom-color: rgba(110, 215, 255, 0.45);
@@ -73,7 +80,14 @@ canvas#stage {
   border-bottom-color: rgba(255, 206, 91, 0.5);
   box-shadow: 0 0 20px rgba(255, 206, 91, 0.1);
 }
-.brand { display: flex; align-items: center; gap: 10px; min-width: 240px; }
+.brand {
+  grid-column: 1;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
 .logo {
   font-size: 28px;
   color: var(--accent);
@@ -82,30 +96,42 @@ canvas#stage {
 .company-name { font-weight: 700; letter-spacing: 1px; }
 .tagline { font-size: 11px; color: var(--ink-2); margin-top: 2px; }
 
-.stats {
+.controls {
+  grid-column: 2;
+  grid-row: 1;
   display: flex;
-  gap: 6px;
-  flex: 1;
-  justify-content: center;
   flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+  align-items: center;
+}
+.stats {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(76px, 1fr));
+  gap: 6px;
+  width: 100%;
+  min-width: 0;
 }
 .stat {
   background: var(--bg-2);
   border: 1px solid var(--line);
   border-radius: 6px;
-  padding: 4px 10px;
-  min-width: 86px;
+  padding: 5px 6px;
+  min-width: 0;
+  min-height: 52px;
   text-align: center;
   transition: transform .12s, border-color .2s, box-shadow .2s;
 }
 .stat:hover { transform: translateY(-1px); border-color: var(--accent-2); }
-.stat-label { font-size: 9px; color: var(--ink-2); letter-spacing: 1.2px; }
-.stat-value { font-size: 14px; font-weight: 700; color: var(--ink-0); }
+.stat-label { font-size: 8px; color: var(--ink-2); letter-spacing: 0.9px; line-height: 1.2; }
+.stat-value { font-size: 12px; font-weight: 700; color: var(--ink-0); line-height: 1.2; word-break: break-word; }
 .stat.flash-good { animation: flashGood .6s; }
 .stat.flash-bad  { animation: flashBad .6s; }
 
 /* Series A valuation ring — donut track; fill gradient is set inline in JS (CSP-safe, no @property). */
-.stat-valuation { min-width: 72px; padding-top: 2px; }
+.stat-valuation { min-width: 0; padding-top: 2px; }
 .series-a-ring-wrap {
   position: relative;
   width: 40px;
@@ -346,7 +372,6 @@ body.td-crisis {
   100% { background: var(--bg-2); color: var(--ink-0); }
 }
 
-.controls { display: flex; gap: 6px; }
 .btn {
   font-family: inherit;
   font-size: 12px;
@@ -399,7 +424,7 @@ body.td-crisis {
 
 /* ---------- left panel (roster + feed) ---------- */
 #leftpanel {
-  top: 80px;
+  top: calc(var(--hud-topbar-height, 120px) + 10px);
   left: 12px;
   bottom: 96px;
   width: 280px;
@@ -478,7 +503,7 @@ body.td-crisis {
 
 /* ---------- right panel ---------- */
 #rightpanel {
-  top: 80px;
+  top: calc(var(--hud-topbar-height, 120px) + 10px);
   right: 12px;
   bottom: 96px;
   width: 320px;
@@ -685,6 +710,40 @@ body.td-crisis {
 }
 #chatinput:focus { outline: 1px solid var(--accent-2); }
 
+.ceo-revenue-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding: 6px 0 8px;
+  border-bottom: 1px solid var(--line);
+}
+.ceo-rev-label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 9px;
+  color: var(--ink-2);
+  letter-spacing: 0.4px;
+}
+.ceo-rev-label span { color: var(--ink-1); }
+.ceo-rev-label input {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: var(--bg-1);
+  color: var(--ink-0);
+  font-family: inherit;
+  font-size: 11px;
+}
+.roster-hint {
+  font-size: 9px;
+  color: var(--accent-2);
+  line-height: 1.35;
+  padding: 4px 6px 8px;
+  border-bottom: 1px dashed var(--line);
+  margin-bottom: 4px;
+}
+
 #chat-toggle {
   position: fixed;
   left: 12px;
@@ -765,7 +824,7 @@ body.td-crisis {
 }
 .settings-note { font-size: 10px; color: var(--ink-2); line-height: 1.5; padding: 8px; background: var(--bg-2); border-radius: 6px; border-left: 2px solid var(--gold); }
 #toasts {
-  top: 80px;
+  top: calc(var(--hud-topbar-height, 120px) + 10px);
   left: 50%;
   transform: translateX(-50%);
   display: flex;
