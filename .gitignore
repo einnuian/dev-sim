@@ -17,9 +17,6 @@ build/
 
 node_modules/
 
-# Vite dependency pre-bundle cache (regenerated on `vite` / `npm run dev`)
-frontend/.vite/
-
 tests/
 
 .DS_Store
