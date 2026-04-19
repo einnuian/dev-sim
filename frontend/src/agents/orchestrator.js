@@ -6,13 +6,51 @@
 //
 // Everything emits ticker events and runs against the existing state object.
 
-import { state, pushTick, toast, notify } from '../state/store.js';
+import { state, pushTick, toast, notify, setOrchestrateBusy, pushMatrixStreamLine, openModal } from '../state/store.js';
+import { averageTechnicalScores } from '../data/tycoonRubric.js';
 import { ROLE_LABELS } from '../data/personas.js';
 import { pickTemplate, buildReadme, describeTemplate } from './templates.js';
 import { runDevSimOrchestrate } from './devSimBridge.js';
 
 let prCounter = 1000;
 let projectCounter = 1;
+
+const MATRIX_SNIPS = [
+  'diff --git a/src/core.ts b/src/core.ts',
+  'await anthropic.messages.create({ model: "claude-3-5-sonnet-latest", max_tokens: 8192',
+  '[orchestrate] workspace=/tmp/dev-sim-ws … K2 review pass',
+  'curl -sS -H "Authorization: Bearer $K2_API_KEY" $OPENAI_BASE_URL/chat/completions',
+  'npm run build  ✓  typecheck  ✓  12 tests passed',
+  'git commit -m "feat: CEO prompt — codegen + tests"',
+  'class SprintLedger { balance: number; tech_debt: number',
+  'POST /api/orchestrate 200  (coding_pass_1 complete)',
+  'ruff check . --fix  |  black .  |  mypy src/',
+  '>>> from dev_sim.review_agent import compute_k2_pr_review',
+  'INFO:httpx:HTTP Request: POST https://api.k2… "200 OK"',
+  'def push_workspace_to_target(workspace: Path, pr_owner: str',
+  'conic-gradient(from -90deg, var(--accent) 0deg, var(--accent) 142deg',
+  'export async function runDevSimOrchestrate(prompt) {',
+  '[K2] verdict: approve | technical_scores: 10 keys present',
+];
+
+let matrixIntervalId = null;
+
+function stopMatrixStream() {
+  if (matrixIntervalId != null) {
+    clearInterval(matrixIntervalId);
+    matrixIntervalId = null;
+  }
+  setOrchestrateBusy(false);
+}
+
+function startMatrixStream() {
+  stopMatrixStream();
+  setOrchestrateBusy(true);
+  matrixIntervalId = setInterval(() => {
+    const line = MATRIX_SNIPS[Math.floor(Math.random() * MATRIX_SNIPS.length)];
+    pushMatrixStreamLine(line);
+  }, 90);
+}
 
 function pickByRole(role) {
   return state.team.find(a => !a.fired && a.role === role) || state.team.find(a => !a.fired);
@@ -31,6 +69,8 @@ function reviewFromDevSim(review, verdict) {
   const wins = [];
   const v = String(verdict || review?.verdict || '').toLowerCase();
   let score = 60;
+  const ts = review && typeof review.technical_scores === 'object' ? review.technical_scores : null;
+  const avgTechnical = ts ? averageTechnicalScores(ts) : null;
 
   if (review && Array.isArray(review.issues)) {
     for (const it of review.issues) {
@@ -52,7 +92,7 @@ function reviewFromDevSim(review, verdict) {
   }
   if (review?.summary) wins.push(String(review.summary).slice(0, 160));
 
-  return { score, issues, wins, blocked: false };
+  return { score, issues, wins, blocked: false, technicalScores: ts, avgTechnical };
 }
 
 function escHtml(s) {
@@ -151,6 +191,7 @@ export async function runProject(prompt) {
     `Running full repo + PR pipeline. This can take several minutes.`);
 
   let api;
+  startMatrixStream();
   try {
     api = await runDevSimOrchestrate(prompt);
   } catch (e) {
@@ -160,6 +201,8 @@ export async function runProject(prompt) {
     toast(project.error, 'bad');
     notify();
     return;
+  } finally {
+    stopMatrixStream();
   }
 
   if (!api.ok) {
@@ -182,6 +225,9 @@ export async function runProject(prompt) {
 
   const review = reviewFromDevSim(api.review, api.verdict);
   project.review = review;
+  if (review.technicalScores && typeof review.technicalScores === 'object') {
+    state.economy.lastTechnicalScores = { ...review.technicalScores };
+  }
 
   const html = buildDevSimSummaryHtml(project, prompt, lp, api);
   project.html = html;
@@ -280,6 +326,22 @@ export async function runProject(prompt) {
   project.phase = 'done';
   emit(project, sm, `${prId} merged. Sprint log updated. Next?`);
   notify();
+
+  const ts = api.review && typeof api.review.technical_scores === 'object' ? api.review.technical_scores : null;
+  if (ts && Object.keys(ts).length) {
+    const avgTechnical = averageTechnicalScores(ts);
+    openModal('k2-audit', {
+      technicalScores: { ...ts },
+      avgTechnical,
+      approved: avgTechnical > 6,
+      projectName: project.name || project.id,
+    });
+  }
+
+  const tp = api.targetPush;
+  if (tp && tp.ok === true && !tp.skipped && tp.url) {
+    toast(`Hackathon export pushed to ${tp.target || 'GitHub'} — ${tp.url}`, 'good');
+  }
 }
 
 function guessName(prompt, fallback) {

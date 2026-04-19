@@ -1,6 +1,7 @@
 // HUD rendering — DOM panels driven by store subscriptions.
 import { state, subscribe, openModal, closeModal, leadershipLabel, recomputeBurn, pushTick, toast } from '../state/store.js';
 import { ROLE_LABELS, ROLE_SHORT } from '../data/personas.js';
+import { TYCOON_TECH_KEYS } from '../data/tycoonRubric.js';
 import { LEVERS, ACHIEVEMENTS } from '../data/events.js';
 import {
   startSprint, endSprint, advanceToNextSprint, planSprint,
@@ -17,25 +18,155 @@ function portrait(agent, size = 32) {
   return portraitCache.get(key);
 }
 
+// HUD number odometer (cash / MRR / valuation) — vanilla RAF, textContent only, NaN-safe (CSP-safe).
+let _hudLerp = null;
+let _hudRaf = 0;
+
+function safeNum(n, fallback = 0) {
+  const x = typeof n === 'number' ? n : Number(n);
+  return Number.isFinite(x) ? x : fallback;
+}
+
+function fmtMoney(n) {
+  const x = Math.round(safeNum(n, 0));
+  return '$' + x.toLocaleString();
+}
+
+function cssVarColor(name, fallback) {
+  const raw = getComputedStyle(document.documentElement).getPropertyValue(name);
+  const v = (raw && raw.trim()) || '';
+  return v || fallback;
+}
+
+/** Series A ring: inline conic-gradient only (no custom-property animation / no eval). */
+function applySeriesARingFill(ring, valuation) {
+  if (!ring) return;
+  const cap = 2_000_000;
+  const v = Math.max(0, safeNum(valuation, 0));
+  const pct = Math.min(100, cap > 0 ? (v / cap) * 100 : 0);
+  const deg = (pct / 100) * 360;
+  const accent = cssVarColor('--accent', '#6ad7ff');
+  const bg3 = cssVarColor('--bg-3', '#1e2538');
+  ring.style.background = `conic-gradient(from -90deg, ${accent} 0deg, ${accent} ${deg}deg, ${bg3} ${deg}deg)`;
+}
+
+function hudTargetsFromEconomy() {
+  const e = state.economy;
+  const mrrSrc = typeof e.activeMrr === 'number' && Number.isFinite(e.activeMrr) ? e.activeMrr : e.mrr;
+  return {
+    cash: safeNum(e.cash, 0),
+    mrr: safeNum(mrrSrc, 0),
+    val: safeNum(e.valuation, 0),
+  };
+}
+
+function initHudLerpIfNeeded() {
+  if (_hudLerp) return;
+  _hudLerp = hudTargetsFromEconomy();
+}
+
+function resetHudLerpIfCorrupt() {
+  if (!_hudLerp) return;
+  if (
+    !Number.isFinite(_hudLerp.cash) ||
+    !Number.isFinite(_hudLerp.mrr) ||
+    !Number.isFinite(_hudLerp.val)
+  ) {
+    _hudLerp = hudTargetsFromEconomy();
+  }
+}
+
+function applyHudLerpToDom() {
+  if (!_hudLerp) return;
+  resetHudLerpIfCorrupt();
+  const v = Math.max(0, safeNum(_hudLerp.val, 0));
+  const seriesCap = 2_000_000;
+  const pct = seriesCap > 0 ? Math.min(100, (v / seriesCap) * 100) : 0;
+  const ring = qs('#valuation-ring');
+  applySeriesARingFill(ring, v);
+  set('stat-valuation-pct', `${pct.toFixed(0)}%`);
+  set('stat-valuation-num', fmtMoney(v));
+  set('stat-cash', fmtMoney(_hudLerp.cash));
+  set('stat-mrr', `${fmtMoney(_hudLerp.mrr)}/mo`);
+}
+
+function hudLerpTick() {
+  const targets = hudTargetsFromEconomy();
+  resetHudLerpIfCorrupt();
+  const rate = 0.22;
+  _hudLerp.cash += (targets.cash - _hudLerp.cash) * rate;
+  _hudLerp.mrr += (targets.mrr - _hudLerp.mrr) * rate;
+  _hudLerp.val += (targets.val - _hudLerp.val) * rate;
+  applyHudLerpToDom();
+  const done =
+    Math.abs(targets.cash - _hudLerp.cash) < 0.35 &&
+    Math.abs(targets.mrr - _hudLerp.mrr) < 0.15 &&
+    Math.abs(targets.val - _hudLerp.val) < 800;
+  if (done) {
+    _hudLerp.cash = targets.cash;
+    _hudLerp.mrr = targets.mrr;
+    _hudLerp.val = targets.val;
+    applyHudLerpToDom();
+    _hudRaf = 0;
+  } else {
+    _hudRaf = requestAnimationFrame(hudLerpTick);
+  }
+}
+
+function kickHudLerpIfNeeded() {
+  if (!_hudLerp) return;
+  const t = hudTargetsFromEconomy();
+  const far =
+    Math.abs(t.cash - _hudLerp.cash) > 0.5 ||
+    Math.abs(t.mrr - _hudLerp.mrr) > 0.3 ||
+    Math.abs(t.val - _hudLerp.val) > 500;
+  if (far && !_hudRaf) _hudRaf = requestAnimationFrame(hudLerpTick);
+}
+
 // ---------- top bar ----------
 function renderTopBar() {
   const e = state.economy;
-  set('tagline', `Sprint ${state.sprint.number} | ${capitalize(state.sprint.phase)}${state.sprint.phase === 'execution' ? ' | ' + Math.max(0, Math.ceil(state.sprint.duration - state.sprint.elapsed)) + 's left' : ''}`);
-  set('stat-cash', `$${Math.round(e.cash).toLocaleString()}`);
-  const net = e.burnRate - e.mrr * 4;
-  const runway = net > 0 ? Math.max(0, Math.floor(e.cash / net)) : 99;
+  const sm = typeof e.sprintMonth === 'number' && e.sprintMonth >= 1 ? e.sprintMonth : state.sprint.number;
+  set('tagline', `Ledger mo. ${sm} | Sprint ${state.sprint.number} | ${capitalize(state.sprint.phase)}${state.sprint.phase === 'execution' ? ' | ' + Math.max(0, Math.ceil(state.sprint.duration - state.sprint.elapsed)) + 's left' : ''}`);
+  const burnShown = e.lastSettlementBurn != null ? e.lastSettlementBurn : e.burnRate;
+  const mrrShown =
+    typeof e.activeMrr === 'number' && Number.isFinite(e.activeMrr) ? e.activeMrr : safeNum(e.mrr, 0);
+  const net = safeNum(burnShown, 0) - mrrShown * 4;
+  const runway = net > 0 ? Math.max(0, Math.floor(safeNum(e.cash, 0) / net)) : 99;
   set('stat-runway', `${isFinite(runway) && runway < 99 ? runway : '99+'} sprints`);
-  set('stat-burn', `$${e.burnRate.toLocaleString()}`);
-  set('stat-mrr', `$${e.mrr.toLocaleString()}/mo`);
-  set('stat-debt', `${Math.round(e.techDebt)}%`);
+  set('stat-burn', fmtMoney(burnShown));
+  const debtPct = safeNum(e.techDebt, 0);
+  set('stat-debt', `${Math.round(debtPct)}%`);
   set('stat-rep', `${Math.round(e.reputation)}`);
   set('stat-style', leadershipLabel());
+
+  initHudLerpIfNeeded();
+  kickHudLerpIfNeeded();
+  applyHudLerpToDom();
+
+  const scores = e.lastTechnicalScores;
+  const sec = scores && Number(scores.SecurityBestPractices);
+  const errh = scores && Number(scores.ErrorHandling);
+  const risk = scores != null && (sec < 5 || errh < 5);
+  const debtWrap = qs('#stat-debt-wrap');
+  if (debtWrap) {
+    debtWrap.classList.toggle('stat-debt-risk', Boolean(risk) && debtPct <= 80);
+    debtWrap.classList.toggle('stat-debt-crisis', debtPct > 80);
+  }
+  document.body.classList.toggle('td-crisis', debtPct > 80);
+
   qs('#btn-pause').textContent = state.paused ? '> Resume' : '|| Pause';
   qs('#btn-speed').textContent = `>> ${state.speed}x`;
   qs('#btn-end-sprint').textContent =
     state.sprint.phase === 'planning' ? 'Start Sprint >' :
     state.sprint.phase === 'execution' ? 'End Sprint >' :
     'Next Sprint >';
+
+  const topbar = qs('#topbar');
+  if (topbar) {
+    topbar.classList.toggle('hud-sprint-live', state.sprint.phase === 'execution');
+    topbar.classList.toggle('hud-sprint-review', state.sprint.phase === 'review');
+  }
 }
 
 // ---------- roster ----------
@@ -87,6 +218,17 @@ function renderTicker() {
 function renderBoard() {
   const root = qs('#board');
   root.innerHTML = '';
+  if (state.sprint.phase === 'execution') {
+    const heat = Math.round(Math.min(1, Math.max(0, state.ui.sprintHeat || 0)) * 100);
+    const strip = el('div', 'board-velocity-strip');
+    const track = el('div', 'board-velocity-track');
+    const fill = document.createElement('i');
+    fill.style.width = heat + '%';
+    track.appendChild(fill);
+    strip.appendChild(el('div', 'board-velocity-label', 'SPRINT THROUGHPUT'));
+    strip.appendChild(track);
+    root.appendChild(strip);
+  }
   const cols = [
     { key: 'todo', title: 'TODO', filter: (p) => p === 0 },
     { key: 'doing', title: 'DOING', filter: (p) => p > 0 && p < 0.6 },
@@ -111,6 +253,16 @@ function renderBoard() {
       col.appendChild(card);
     }
     root.appendChild(col);
+  }
+  if (state.ui?.orchestrateBusy) {
+    const ov = el('div', 'matrix-board-overlay');
+    ov.appendChild(el('div', 'matrix-head', 'NEURAL BUILD PIPELINE // AI DEV TEAM'));
+    const pre = document.createElement('pre');
+    pre.className = 'matrix-stream';
+    const lines = state.ui.matrixLines || [];
+    pre.textContent = lines.slice(-36).join('\n');
+    ov.appendChild(pre);
+    root.appendChild(ov);
   }
 }
 
@@ -216,6 +368,7 @@ function renderModal() {
     case 'game-over': renderGameOverModal(root); break;
     case 'project': renderProjectModal(root, state.modal.payload.projectId); break;
     case 'agents-help': renderAgentsHelpModal(root); break;
+    case 'k2-audit': renderK2AuditModal(root, state.modal.payload); break;
   }
 }
 
@@ -358,6 +511,104 @@ function actionBtn(label, cls, fn) {
   const b = el('button', 'btn ' + cls, label);
   b.addEventListener('click', fn);
   return b;
+}
+
+/** K2 rubric radar: scores are 1–10 per axis. */
+function drawTycoonRadar(canvas, scores) {
+  const size = canvas.width;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  ctx.clearRect(0, 0, size, size);
+  const cx = size / 2;
+  const cy = size / 2;
+  const r = size / 2 - 36;
+  const keys = TYCOON_TECH_KEYS;
+  const n = keys.length;
+  ctx.strokeStyle = '#2a3550';
+  for (let g = 1; g <= 5; g++) {
+    ctx.beginPath();
+    for (let i = 0; i <= n; i++) {
+      const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+      const px = cx + Math.cos(a) * (r * g / 5);
+      const py = cy + Math.sin(a) * (r * g / 5);
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.stroke();
+  }
+  for (let i = 0; i < n; i++) {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    ctx.beginPath();
+    ctx.moveTo(cx, cy);
+    ctx.lineTo(cx + Math.cos(a) * r, cy + Math.sin(a) * r);
+    ctx.strokeStyle = '#334060';
+    ctx.stroke();
+  }
+  ctx.fillStyle = 'rgba(110, 215, 255, 0.22)';
+  ctx.strokeStyle = '#6ad7ff';
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  keys.forEach((k, i) => {
+    const raw = scores && scores[k];
+    const v = Math.max(0, Math.min(10, Number(raw) || 0)) / 10;
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    const px = cx + Math.cos(a) * r * v;
+    const py = cy + Math.sin(a) * r * v;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  });
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+  ctx.lineWidth = 1;
+  ctx.fillStyle = '#b6c0d8';
+  ctx.font = '9px JetBrains Mono, ui-monospace, monospace';
+  keys.forEach((k, i) => {
+    const a = (i / n) * Math.PI * 2 - Math.PI / 2;
+    const px = cx + Math.cos(a) * (r + 18);
+    const py = cy + Math.sin(a) * (r + 18) + 3;
+    ctx.textAlign = 'center';
+    const short = k.replace(/([A-Z])/g, ' $1').trim().split(/\s+/).slice(0, 2).join(' ');
+    ctx.fillText(short.length > 14 ? short.slice(0, 13) + '…' : short, px, py);
+  });
+}
+
+function renderK2AuditModal(root, payload) {
+  const technicalScores = payload?.technicalScores || {};
+  const avgTechnical = typeof payload?.avgTechnical === 'number' ? payload.avgTechnical : 0;
+  const approved = Boolean(payload?.approved);
+  const projectName = payload?.projectName || 'Sprint';
+
+  const body = el('div', 'k2-audit-body');
+  const hero = el('div', 'k2-audit-hero');
+  hero.innerHTML = `
+    <h2 class="k2-audit-title">Staff engineer audit</h2>
+    <p class="k2-audit-sub">${escapeHtml(projectName)}</p>
+  `;
+  body.appendChild(hero);
+
+  const layout = el('div', 'k2-audit-layout');
+  const rw = el('div', 'k2-radar-wrap');
+  const c = document.createElement('canvas');
+  c.className = 'k2-radar-canvas';
+  c.width = 300;
+  c.height = 300;
+  drawTycoonRadar(c, technicalScores);
+  rw.appendChild(c);
+  layout.appendChild(rw);
+
+  const stamp = el('div', `k2-audit-stamp ${approved ? 'approved' : 'rejected'}`);
+  stamp.textContent = approved ? 'APPROVED' : 'REJECTED — HIGH TECH DEBT';
+  layout.appendChild(stamp);
+  body.appendChild(layout);
+
+  const stats = el('div', 'k2-audit-stats');
+  stats.textContent = `Average rubric score: ${avgTechnical.toFixed(2)} / 10 (10 K2 metrics)`;
+  body.appendChild(stats);
+
+  const footBtn = el('button', 'btn btn-primary', 'Continue');
+  footBtn.addEventListener('click', closeModal);
+  root.appendChild(modalShell('Code review', body, footBtn));
 }
 
 function drawRadar(skills, size) {
@@ -647,7 +898,7 @@ function renderProjectModal(root, projectId) {
   body.appendChild(brief);
 
   const tabs = el('div', 'proj-tabs');
-  const tabKeys = [['preview', 'PLAY'], ['chat', 'TEAM CHAT'], ['code', 'CODE'], ['readme', 'README']];
+  const tabKeys = [['preview', 'PLAY'], ['chat', 'TEAM CHAT'], ['code', 'CODE'], ['readme', 'README'], ['audit', 'AUDIT']];
   const content = el('div');
   let active = 'preview';
   function paint() {
@@ -681,6 +932,34 @@ function renderProjectModal(root, projectId) {
       const r = el('div', 'proj-readme');
       r.textContent = p.readme || 'No README yet.';
       content.appendChild(r);
+    } else if (active === 'audit') {
+      const wrap = el('div');
+      const ts = state.economy?.lastTechnicalScores;
+      if (!ts || typeof ts !== 'object') {
+        wrap.innerHTML = '<p style="color:var(--ink-2);font-size:12px;line-height:1.5">No staff audit yet. End a sprint to run settlement and generate K2-style rubric scores on the server.</p>';
+        content.appendChild(wrap);
+      } else {
+        const intro = el('p');
+        intro.style.cssText = 'color:var(--ink-1);font-size:11px;margin:0 0 10px;line-height:1.5';
+        intro.textContent = 'Latest technical audit (1–10 per metric) from the last sprint settlement.';
+        wrap.appendChild(intro);
+        const table = el('table', 'audit-table');
+        const thead = document.createElement('thead');
+        thead.innerHTML = '<tr><th>Metric</th><th>Score</th></tr>';
+        table.appendChild(thead);
+        const tbody = document.createElement('tbody');
+        for (const key of TYCOON_TECH_KEYS) {
+          const tr = document.createElement('tr');
+          const v = ts[key];
+          const n = typeof v === 'number' ? v : Number(v);
+          const cell = Number.isFinite(n) ? `${n} / 10` : '—';
+          tr.innerHTML = `<td>${escapeHtml(key)}</td><td>${escapeHtml(cell)}</td>`;
+          tbody.appendChild(tr);
+        }
+        table.appendChild(tbody);
+        wrap.appendChild(table);
+        content.appendChild(wrap);
+      }
     }
   }
   for (const [k, label] of tabKeys) {
@@ -749,8 +1028,10 @@ function renderAgentsHelpModal(root) {
     <p style="color:var(--ink-1);font-size:12px;margin-top:0;line-height:1.55">
       CEO prompts are sent to the <strong>dev_sim_bridge</strong> HTTP service, which runs the same flow as
       <code>python -m dev_sim.orchestrate</code> (Claude coding agent → K2 PR review → optional follow-up).
-      Configure <code>ANTHROPIC_API_KEY</code>, <code>GITHUB_TOKEN</code>, and <code>K2_API_KEY</code> in a <code>.env</code>
-      file at the repository root — not in this UI.
+      Ending a sprint calls <code>POST /api/simulate</code> to sync cash, MRR, valuation, and tech debt with the Python tycoon ledger.
+      Put secrets in <code>.dev-sim/.env</code> (loaded first) or <code>.env</code> at the repo root — same keys as
+      <code>ANTHROPIC_API_KEY</code>, <code>GITHUB_TOKEN</code>, <code>K2_API_KEY</code> (or <code>OPENAI_API_KEY</code> for K2 proxies),
+      plus optional <code>TARGET_GITHUB_REPO</code>. The bridge loads these before any agent runs.
     </p>
     <pre style="font-size:11px;background:var(--panel);padding:12px;border-radius:8px;overflow:auto;line-height:1.45">
 # Terminal 1 — from repo root
@@ -796,7 +1077,7 @@ export function initHud() {
   qs('#btn-end-sprint').addEventListener('click', () => {
     if (state.modal) return;
     if (state.sprint.phase === 'planning') startSprint();
-    else if (state.sprint.phase === 'execution') endSprint();
+    else if (state.sprint.phase === 'execution') void endSprint();
     else if (state.sprint.phase === 'review') advanceToNextSprint();
   });
 
@@ -846,6 +1127,25 @@ export function initHud() {
   });
 
   qs('#btn-agents-help').addEventListener('click', () => openModal('agents-help', {}));
+
+  document.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+    if (e.target instanceof HTMLElement && e.target.isContentEditable) return;
+    if (e.code === 'Space') {
+      e.preventDefault();
+      state.paused = !state.paused;
+      renderTopBar();
+    } else if (e.code === 'Digit1') {
+      state.speed = 1;
+      renderTopBar();
+    } else if (e.code === 'Digit2') {
+      state.speed = 2;
+      renderTopBar();
+    } else if (e.code === 'Digit4') {
+      state.speed = 4;
+      renderTopBar();
+    }
+  });
 
   renderAll();
   subscribe(renderAll);

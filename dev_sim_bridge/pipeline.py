@@ -2,8 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
+
+from dotenv import load_dotenv
+
+# Load repo secrets before any ``dev_sim`` import (those modules pull config at import time).
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+load_dotenv(_REPO_ROOT / ".dev-sim" / ".env", override=True)
+load_dotenv(_REPO_ROOT / ".env", override=True)
 
 from dev_sim.coding_agent import run_coding_agent, workspace_root
 from dev_sim.config import (
@@ -17,6 +25,7 @@ from dev_sim.config import (
 )
 from dev_sim.orchestrate import _followup_prompt
 from dev_sim.personas_bridge import coding_persona_bundle, review_persona_bundle
+from dev_sim.push_target_repo import push_workspace_to_target
 from dev_sim.review_agent import compute_k2_pr_review, post_pr_issue_comment
 
 
@@ -39,6 +48,8 @@ def run_orchestrate_for_prompt(
 
     ``repo_root`` is used for ``repo-registry.json`` when ``repo_registry`` is omitted.
     """
+    load_dotenv(repo_root / ".dev-sim" / ".env", override=True)
+    load_dotenv(repo_root / ".env", override=True)
     load_env()
     t = (text or "").strip()
     if not t:
@@ -148,6 +159,33 @@ def run_orchestrate_for_prompt(
         )
         r2_summary = _serialize_run(r2)
 
+    project_label = _project_label(t)
+    # Persist workspace + PR slug so POST /api/simulate can run a follow-up GitHub export.
+    ctx_path = repo_root / ".dev-sim" / "last-export-context.json"
+    try:
+        ctx_path.parent.mkdir(parents=True, exist_ok=True)
+        ctx_path.write_text(
+            json.dumps(
+                {"workspace": str(ws.resolve()), "pr_owner": owner, "pr_repo": repo},
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+    target_push: dict[str, Any] | None = None
+    try:
+        target_push = push_workspace_to_target(
+            workspace=ws,
+            pr_owner=owner,
+            pr_repo=repo,
+            github_token=gh or "",
+            project_name=project_label,
+        )
+    except Exception as e:  # noqa: BLE001 — never fail the orchestrate response
+        target_push = {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
     return {
         "ok": True,
         "codingPass1": _serialize_run(r1),
@@ -158,7 +196,13 @@ def run_orchestrate_for_prompt(
         "followUpSkipped": skip_followup,
         "codingPass2": r2_summary,
         "lastPr": _serialize_pr(last_pr),
+        "targetPush": target_push,
     }
+
+
+def _project_label(prompt: str) -> str:
+    line = (prompt or "").strip().split("\n", 1)[0].strip()
+    return (line[:80] if line else "project").strip() or "project"
 
 
 def _serialize_run(r: dict[str, Any]) -> dict[str, Any]:
@@ -179,4 +223,3 @@ def _serialize_pr(last_pr: Any) -> dict[str, Any] | None:
         "title": str(last_pr.get("title") or ""),
         "fullName": f"{owner}/{repo}" if owner and repo else "",
     }
-

@@ -51,14 +51,29 @@ export const state = {
   achievements: [], // unlocked ids
   toasts: [], // {id, kind, text, ttl}
   modal: null, // {kind, payload}
+  ui: {
+    orchestrateBusy: false,
+    /** @type {string[]} */
+    matrixLines: [],
+    /** Mean ticket progress 0–1 during execution (drives HUD / board “heat”). */
+    sprintHeat: 0,
+  },
   economy: {
     cash: 60000,
     mrr: 1200,
     contracts: [], // active client contracts
     burnRate: 0,
-    techDebt: 5,
+    techDebt: 0,
     reputation: 50,
     leadershipKarma: 0, // -100..100
+    // Tycoon engine (Python /api/simulate) — synced each sprint end
+    valuation: 0,
+    activeMrr: null, // number after first tycoon sync; until then HUD uses `mrr`
+    hypeMultiplier: 1,
+    sprintMonth: 1,
+    lastTechnicalScores: null, // { CodeReadability: 1-10, ... }
+    lastSettlementBurn: null, // last POST /api/simulate burn_rate (monthly $)
+    lastTycoonStatus: null, // CONTINUE | SERIES_A | BANKRUPT | OUTAGE_SURVIVED
   },
   stats: {
     commits: 0, prs: 0, builds: { pass: 0, fail: 0 },
@@ -95,6 +110,44 @@ export function recomputeBurn() {
   state.economy.burnRate = salaries + 800; // infra
 }
 
+/** Sum of 1–5 “stat tiers” per live agent skill (matches backend team_stats_sum scale). */
+export function computeTeamStatsSumForTycoon() {
+  const keys = ['frontend', 'backend', 'devops', 'design', 'comms', 'leadership'];
+  let sum = 0;
+  for (const a of state.team.filter((x) => !x.fired)) {
+    const sk = a.skills || {};
+    for (const k of keys) {
+      const v = Number(sk[k]) || 0;
+      sum += Math.max(1, Math.min(5, Math.round(v / 25) || 1));
+    }
+  }
+  return sum;
+}
+
+/**
+ * Apply JSON from POST /api/simulate (snake_case keys) onto state.economy and refresh HUD.
+ * @param {Record<string, unknown>} payload
+ */
+export function applyTycoonApiResponse(payload) {
+  if (!payload || typeof payload !== 'object') return;
+  const e = state.economy;
+  if (typeof payload.balance === 'number' && Number.isFinite(payload.balance)) e.cash = payload.balance;
+  if (typeof payload.active_mrr === 'number' && Number.isFinite(payload.active_mrr)) {
+    e.activeMrr = payload.active_mrr;
+    e.mrr = payload.active_mrr;
+  }
+  if (typeof payload.valuation === 'number') e.valuation = payload.valuation;
+  if (typeof payload.tech_debt === 'number') e.techDebt = payload.tech_debt;
+  if (typeof payload.hype_multiplier === 'number') e.hypeMultiplier = payload.hype_multiplier;
+  if (typeof payload.sprint_month === 'number') e.sprintMonth = payload.sprint_month;
+  if (typeof payload.burn_rate === 'number') e.lastSettlementBurn = payload.burn_rate;
+  if (typeof payload.status === 'string') e.lastTycoonStatus = payload.status;
+  if (payload.technical_scores && typeof payload.technical_scores === 'object') {
+    e.lastTechnicalScores = { ...payload.technical_scores };
+  }
+  notify();
+}
+
 export function leadershipLabel() {
   const k = state.economy.leadershipKarma;
   if (k <= -40) return 'Tyrant';
@@ -128,5 +181,19 @@ export function openModal(kind, payload) {
 export function closeModal() {
   state.modal = null;
   state.paused = false;
+  notify();
+}
+
+/** CEO chat → /api/orchestrate: show Matrix stream overlay on the sprint board. */
+export function setOrchestrateBusy(busy) {
+  state.ui.orchestrateBusy = !!busy;
+  if (busy) state.ui.matrixLines = [];
+  notify();
+}
+
+/** Append one line to the Matrix-style stream (max ~32 lines). */
+export function pushMatrixStreamLine(line) {
+  state.ui.matrixLines.push(String(line));
+  if (state.ui.matrixLines.length > 32) state.ui.matrixLines.shift();
   notify();
 }

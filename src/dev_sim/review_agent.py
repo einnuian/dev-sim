@@ -17,7 +17,7 @@ import httpx
 from openai import OpenAI
 
 from dev_sim.agent_progress import AgentProgressLogger, ProgressAnnouncer
-from dev_sim.config import K2_API_BASE, get_k2_api_key
+from dev_sim.config import get_k2_api_key, resolve_k2_api_base
 
 # Must match shared/review_schema.TECHNICAL_SCORE_KEYS (economy + audit rubric).
 TECHNICAL_SCORE_KEYS: tuple[str, ...] = (
@@ -393,7 +393,7 @@ def compute_k2_pr_review(
                 persona_system_prefix.strip() + "\n\n---\n\n" + REVIEW_SYSTEM_PROMPT.strip()
             )
 
-        client = OpenAI(api_key=k2_key, base_url=K2_API_BASE)
+        client = OpenAI(api_key=k2_key, base_url=resolve_k2_api_base())
         if announcer is not None:
             announcer.set_phase("reviewing")
         try:

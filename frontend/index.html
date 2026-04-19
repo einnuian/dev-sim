@@ -61,11 +61,11 @@
       <div class="stats">
         <div class="stat" title="Cash on hand">
           <div class="stat-label">CASH</div>
-          <div class="stat-value" id="stat-cash">$0</div>
+          <div class="stat-value" id="stat-cash">$60,000</div>
         </div>
         <div class="stat" title="Sprints until bankruptcy">
           <div class="stat-label">RUNWAY</div>
-          <div class="stat-value" id="stat-runway">— sprints</div>
+          <div class="stat-value" id="stat-runway">99+ sprints</div>
         </div>
         <div class="stat" title="Burn rate per sprint">
           <div class="stat-label">BURN</div>
@@ -73,9 +73,18 @@
         </div>
         <div class="stat" title="Monthly recurring revenue">
           <div class="stat-label">MRR</div>
-          <div class="stat-value" id="stat-mrr">$0</div>
+          <div class="stat-value" id="stat-mrr">$1,200/mo</div>
         </div>
-        <div class="stat" title="Tech debt">
+        <div class="stat stat-valuation" title="Paper valuation toward Series A ($2M)">
+          <div class="stat-label">SERIES A</div>
+          <div class="series-a-ring-wrap" aria-hidden="true">
+            <div class="series-a-ring-track" aria-hidden="true"></div>
+            <div class="series-a-ring-fill" id="valuation-ring"></div>
+            <div class="series-a-ring-center" id="stat-valuation-pct">0%</div>
+          </div>
+          <div class="stat-value stat-valuation-num" id="stat-valuation-num">$0</div>
+        </div>
+        <div class="stat" id="stat-debt-wrap" title="Tech debt (engine)">
           <div class="stat-label">TECH DEBT</div>
           <div class="stat-value" id="stat-debt">0%</div>
         </div>
@@ -89,8 +98,8 @@
         </div>
       </div>
       <div class="controls">
-        <button id="btn-pause" class="btn btn-ghost">|| Pause</button>
-        <button id="btn-speed" class="btn btn-ghost">&gt;&gt; 1x</button>
+        <button id="btn-pause" type="button" class="btn btn-ghost" title="Keyboard: Space">|| Pause</button>
+        <button id="btn-speed" type="button" class="btn btn-ghost" title="Keyboard: 1 = 1x, 2 = 2x, 4 = 4x">&gt;&gt; 1x</button>
         <button id="btn-end-sprint" class="btn btn-primary">End Sprint &gt;</button>
       </div>
     </header>

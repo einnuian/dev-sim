@@ -26,6 +26,10 @@ DEFAULT_REVIEW_MODEL = "claude-sonnet-4-6"
 K2_DEFAULT_REVIEW_MODEL = "MBZUAI-IFM/K2-Think-v2"
 K2_API_BASE = "https://api.k2think.ai/v1"
 K_K2_API_KEY = "K2_API_KEY"
+K_OPENAI_API_KEY = "OPENAI_API_KEY"
+# Optional: OpenAI-compatible base URL (proxy or alternate K2 host)
+K_OPENAI_BASE_URL = "OPENAI_BASE_URL"
+K_K2_OPENAI_BASE_URL = "K2_OPENAI_BASE_URL"
 # Optional: override K2 model id for review (defaults to K2_DEFAULT_REVIEW_MODEL)
 K2_REVIEW_MODEL = "K2_REVIEW_MODEL"
 
@@ -56,8 +60,21 @@ def get_github_token() -> str | None:
 
 
 def get_k2_api_key() -> str | None:
-    v = os.environ.get(K_K2_API_KEY)
-    return v if v else None
+    """K2-compatible API key: ``K2_API_KEY`` first, then ``OPENAI_API_KEY`` for proxies."""
+    for key in (K_K2_API_KEY, K_OPENAI_API_KEY):
+        v = os.environ.get(key)
+        if v and str(v).strip():
+            return str(v).strip()
+    return None
+
+
+def resolve_k2_api_base() -> str:
+    """Base URL for the OpenAI-compatible K2 client (env override then default K2 host)."""
+    for key in (K_K2_OPENAI_BASE_URL, K_OPENAI_BASE_URL):
+        v = os.environ.get(key)
+        if v and str(v).strip():
+            return str(v).strip().rstrip("/")
+    return str(K2_API_BASE).rstrip("/")
 
 
 def resolve_k2_review_model(override: str | None) -> str:

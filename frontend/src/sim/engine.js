@@ -1,9 +1,21 @@
 // Simulation engine — drives the live sprint: agents take tickets, commit, open PRs,
 // argue in stand-ups, and produce events.
-import { state, notify, pushTick, toast, recomputeBurn, openModal, leadershipLabel } from '../state/store.js';
+import {
+  state,
+  notify,
+  pushTick,
+  toast,
+  recomputeBurn,
+  openModal,
+  leadershipLabel,
+  computeTeamStatsSumForTycoon,
+  applyTycoonApiResponse,
+} from '../state/store.js';
+import { runTycoonSprint } from '../agents/devSimBridge.js';
 import { ROLE_LABELS } from '../data/personas.js';
 import { makeStandup, makePRComment, makeRetro, makeQuip, makeCommitMsg, whyDifferent } from '../data/dialogue.js';
 import { EVENT_DECK, ACHIEVEMENTS } from '../data/events.js';
+import { spawnFx } from '../draw/scene.js';
 
 let prCounter = 1;
 
@@ -67,6 +79,7 @@ export function tick(dt) {
   if (state.sprint.phase === 'execution') {
     state.sprint.elapsed += t;
     progressTickets(t);
+    updateSprintHeat();
     standupTimer += t;
     chatterTimer += t;
     eventTimer += t;
@@ -76,12 +89,25 @@ export function tick(dt) {
     if (eventTimer > 35 + Math.random() * 15) { eventTimer = 0; drawRandomEvent(); }
 
     if (state.sprint.elapsed >= state.sprint.duration) {
-      endSprint();
+      void endSprint();
     }
+  } else {
+    state.ui.sprintHeat = 0;
   }
 
   checkAchievements();
   notify();
+}
+
+function updateSprintHeat() {
+  const s = state.sprint;
+  let sum = 0;
+  let n = 0;
+  for (const ticket of s.backlog) {
+    sum += Math.min(1, Math.max(0, s.progress[ticket.id] || 0));
+    n++;
+  }
+  state.ui.sprintHeat = n ? sum / n : 0;
 }
 
 function clamp(v) { return Math.max(-100, Math.min(100, v)); }
@@ -137,6 +163,9 @@ function onTicketDone(agent, ticket) {
   agent.activity = 'celebrate';
   agent.activityTtl = 2;
   agent.speaking = { text: 'PR up!', ttl: 2 };
+  if (Number.isFinite(agent.px) && Number.isFinite(agent.py)) {
+    spawnFx('good', agent.px + 10, agent.py - 18);
+  }
   // schedule reviews
   scheduleReview(pr, agent);
   // build pass/fail
@@ -152,6 +181,9 @@ function onTicketDone(agent, ticket) {
       pushTick('build-fail', agent.displayName, `build FAILED for ${pr.id}`);
       pr.status = 'failed';
       shakeStage();
+      if (Number.isFinite(agent.px) && Number.isFinite(agent.py)) {
+        spawnFx('bad', agent.px + 10, agent.py - 14);
+      }
     }
     notify();
   }, 2500 + Math.random() * 2000);
@@ -234,12 +266,40 @@ export function startSprint() {
   notify();
 }
 
-export function endSprint() {
+export async function endSprint() {
   state.sprint.phase = 'review';
-  // pay salaries / collect MRR
-  state.economy.cash -= state.economy.burnRate;
-  state.economy.cash += state.economy.mrr * 4; // ~monthly per sprint feel
-  if (state.economy.cash > 0 && state.economy.mrr * 4 > state.economy.burnRate) state.stats.profitableSprints++;
+  // Python tycoon ledger: mock audit + monthly settlement (POST /api/simulate)
+  const teamSum = computeTeamStatsSumForTycoon();
+  const expectedMrr =
+    typeof state.economy.activeMrr === 'number' ? state.economy.activeMrr : state.economy.mrr;
+  try {
+    const payload = await runTycoonSprint(
+      `Sprint ${state.sprint.number}`,
+      `${state.sprint.backlog.length} tickets in backlog`,
+      Number(expectedMrr),
+      teamSum,
+    );
+    applyTycoonApiResponse(payload);
+    recomputeBurn();
+    const tp = payload && typeof payload === 'object' ? payload.targetPush : null;
+    if (tp && tp.ok === true && !tp.skipped && tp.url) {
+      toast(`Post-sprint GitHub export: ${tp.url}`, 'good');
+    }
+    const burn = state.economy.lastSettlementBurn ?? state.economy.burnRate;
+    if (state.economy.cash > 0 && state.economy.activeMrr * 4 > burn) state.stats.profitableSprints++;
+    if (payload.status === 'SERIES_A') {
+      toast('Series A: valuation reached $2M!', 'gold');
+    } else if (payload.status === 'OUTAGE_SURVIVED') {
+      toast('Production outage: SLA penalty. Tech debt partially reset.', 'bad');
+    } else if (payload.status === 'BANKRUPT') {
+      toast('Bankrupt (company balance depleted).', 'bad');
+    }
+  } catch (err) {
+    toast(`Tycoon sync failed: ${err?.message || err}. Using local fallback.`, 'bad');
+    state.economy.cash -= state.economy.burnRate;
+    state.economy.cash += state.economy.mrr * 4;
+    if (state.economy.cash > 0 && state.economy.mrr * 4 > state.economy.burnRate) state.stats.profitableSprints++;
+  }
   if (state.stats.sprintBugs === 0) state.stats.zeroBugSprints++;
   state.stats.sprintBugs = 0;
   if (Math.random() < 0.3) state.stats.fridayShips++;
@@ -323,8 +383,7 @@ export function advanceToNextSprint() {
     a._codeQuality = 0;
     // _hrFlag persists across sprints intentionally so repeated low scores accumulate
   }
-  // tech debt naturally rises
-  state.economy.techDebt = Math.min(100, state.economy.techDebt + 3);
+  // Tech debt is driven by the Python tycoon engine at sprint end; no local creep here.
   // refill backlog with cycled items
   state.sprint.backlog = state.sprint.backlog.map(t => ({ ...t, id: t.id + '.' + state.sprint.number }));
   planSprint();
