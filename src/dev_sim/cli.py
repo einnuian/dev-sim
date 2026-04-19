@@ -65,7 +65,7 @@ def main() -> None:
         "--persona-role",
         choices=("backend", "frontend"),
         default=DEFAULT_CODING_PERSONA_ROLE,
-        help="DevTeam coding persona slice after the operational system prompt (default: backend)",
+        help="Simians coding persona slice after the operational system prompt (default: backend)",
     )
     parser.add_argument(
         "--persona-seed",

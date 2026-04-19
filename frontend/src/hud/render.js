@@ -19,7 +19,7 @@ import { fetchDevTeamAgents } from '../api/agentsApi.js';
 import { fetchCompanyState, postResetCompanyState } from '../api/economyApi.js';
 import { clearSpeechBubbles } from '../draw/scene.js';
 
-/** True while a full restart is mutating state — blocks Space (pause) and duplicate restart clicks. */
+/** True while a full restart is mutating state — blocks Space (pause toggle) and duplicate restart clicks. */
 let _restartInProgress = false;
 
 /** Skip rebuilding LIVE FEED DOM when the visible slice is unchanged (avoids shimmer on every sim tick). */
@@ -220,14 +220,16 @@ function renderTopBar() {
   }
   document.body.classList.toggle('td-crisis', debtPct > 80);
 
-  qs('#btn-pause').textContent = state.paused ? '> Resume' : '|| Pause';
-  qs('#btn-speed').textContent = `>> ${state.speed}x`;
   const endSprintBtn = qs('#btn-end-sprint');
-  endSprintBtn.textContent =
-    state.sprint.phase === 'planning' ? 'Start Sprint >' :
-    state.sprint.phase === 'execution' ? 'End Sprint >' :
-    'Next Sprint >';
-  endSprintBtn.disabled = !!state.ui.sprintDrivenByOrchestrate;
+  if (endSprintBtn) {
+    const showSprintBtn = state.sprint.phase !== 'planning';
+    endSprintBtn.style.display = showSprintBtn ? '' : 'none';
+    if (showSprintBtn) {
+      endSprintBtn.textContent =
+        state.sprint.phase === 'execution' ? 'End Sprint >' : 'Next Sprint >';
+      endSprintBtn.disabled = !!state.ui.sprintDrivenByOrchestrate;
+    }
+  }
 
   renderSprintLedgerStrip();
 
@@ -300,7 +302,7 @@ function buildLedgerStatementText() {
   const L = e.lastSprintLedger;
   const sm = typeof e.sprintMonth === 'number' && e.sprintMonth >= 1 ? e.sprintMonth : state.sprint.number;
   const lines = [];
-  lines.push('DEVTEAM SIM INC. — SPRINT LEDGER STATEMENT');
+  lines.push('SIMIANS INC. — SPRINT LEDGER STATEMENT');
   lines.push(`Generated (UTC): ${new Date().toISOString()}`);
   lines.push('');
   lines.push(`Ledger month (Python settlement): ${sm}`);
@@ -343,7 +345,7 @@ function downloadLedgerStatement() {
   const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = `devteam-sim-ledger-statement-mo-${mo}.txt`;
+    a.download = `simians-ledger-statement-mo-${mo}.txt`;
   a.rel = 'noopener';
   document.body.appendChild(a);
   a.click();
@@ -616,16 +618,27 @@ function renderEventsDeck() {
 function renderLevers() {
   const root = qs('#leverstrip');
   root.innerHTML = '';
+  /** Spend levers stay off only while CEO chat is driving ``/api/orchestrate`` (not plain sprint execution). */
+  const leversLocked = !!state.ui.orchestrateBusy || !!state.ui.sprintDrivenByOrchestrate;
   for (const lv of LEVERS) {
-    const b = el('button', 'lever' + (state.economy.cash < lv.cost ? ' disabled' : ''));
-    b.disabled = state.economy.cash < lv.cost;
+    const cashTooLow = state.economy.cash < lv.cost;
+    const off = cashTooLow || leversLocked;
+    const b = el('button', 'lever' + (off ? ' disabled' : ''));
+    b.disabled = off;
+    if (leversLocked && !cashTooLow) {
+      b.title = 'Unavailable while the team is running a dev-sim build from chat.';
+    } else if (cashTooLow) {
+      b.title = 'Not enough cash.';
+    } else {
+      b.title = '';
+    }
     b.innerHTML = `
       <div><span class="lever-icon">[+]</span> <span class="lever-name">${lv.name}</span></div>
       <div class="pr-meta">${lv.blurb}</div>
       <div class="lever-cost">${lv.cost ? '$' + lv.cost.toLocaleString() : 'free'}</div>
     `;
     b.addEventListener('click', () => {
-      if (state.economy.cash < lv.cost) return;
+      if (leversLocked || state.economy.cash < lv.cost) return;
       state.economy.cash -= lv.cost;
       lv.apply(state);
       pushTick('event', 'CEO', `purchased: ${lv.name}.`);
@@ -652,12 +665,42 @@ function renderLevers() {
 }
 
 // ---------- toasts ----------
+/** Stable toast nodes — full ``innerHTML`` clears on every ``notify`` restarted CSS animations (rapid blink). */
+const _toastEls = new Map();
+let _toastListSig = '';
+
 function renderToasts() {
   const root = qs('#toasts');
-  root.innerHTML = '';
-  for (const t of state.toasts) {
-    const div = el('div', 'toast ' + (t.kind || ''), t.text);
-    root.appendChild(div);
+  const list = state.toasts || [];
+  const sig = list.map((t) => `${t.id}\t${t.kind ?? ''}\t${t.text}`).join('|');
+  if (sig === _toastListSig) return;
+  _toastListSig = sig;
+
+  const nextIds = new Set(list.map((t) => t.id));
+
+  for (const id of [..._toastEls.keys()]) {
+    if (!nextIds.has(id)) {
+      _toastEls.get(id)?.remove();
+      _toastEls.delete(id);
+    }
+  }
+
+  for (const t of list) {
+    let div = _toastEls.get(t.id);
+    if (!div) {
+      div = el('div', 'toast ' + (t.kind || ''), t.text);
+      _toastEls.set(t.id, div);
+    } else {
+      const cls = 'toast ' + (t.kind || '');
+      if (div.className !== cls) div.className = cls;
+      if (div.textContent !== String(t.text)) div.textContent = t.text;
+    }
+  }
+  for (let i = 0; i < list.length; i++) {
+    const div = _toastEls.get(list[i].id);
+    const next = i + 1 < list.length ? _toastEls.get(list[i + 1].id) : null;
+    // Avoid ``appendChild`` every notify — moving an in-tree node restarts CSS animations / flickers.
+    if (div.nextSibling !== next) root.insertBefore(div, next);
   }
 }
 
@@ -694,6 +737,9 @@ function modalRenderSignature() {
           proj.review?.score ?? '',
           (proj.html || '').length,
           (proj.readme || '').length,
+          String(proj.gh?.htmlUrl || ''),
+          String(proj.gh?.repoHomeUrl || ''),
+          String(proj.targetRepoExport?.url || ''),
         ].join('\t');
       }
       case 'k2-audit':
@@ -756,7 +802,7 @@ function modalShell(title, bodyEl, footerEl) {
 function renderIntroModal(root) {
   const body = el('div', 'intro-card');
   body.innerHTML = `
-    <h1>DEVTEAM SIMULATOR</h1>
+    <h1>SIMIANS</h1>
     <div class="sub">CEO MODE | ENTERTAINMENT + MEDIA TRACK</div>
     <p style="color:var(--ink-1);max-width:520px;margin:0 auto;line-height:1.6">
       You are the CEO of a tiny software studio staffed by AI engineers.
@@ -1207,12 +1253,12 @@ function renderGameOverModal(root) {
 function renderNewspaperModal(root) {
   const body = el('div', 'newspaper');
   body.innerHTML = `
-    <div class="dateline">SPRINT ${state.sprint.number} EDITION | DEVTEAM TIMES</div>
-    <h1>${escapeHtml(state.newspaperHeadlines[state.newspaperHeadlines.length - 1] || 'Quiet sprint at DevTeam Sim Inc.')}</h1>
+    <div class="dateline">SPRINT ${state.sprint.number} EDITION | SIMIAN TIMES</div>
+    <h1>${escapeHtml(state.newspaperHeadlines[state.newspaperHeadlines.length - 1] || 'Quiet sprint at Simians Inc.')}</h1>
     <p>${state.newspaperHeadlines.slice(0, -1).reverse().map(escapeHtml).join('  ')}
     Reporters note that the team's morale and reputation continue to evolve based on CEO decisions, sprint velocity, and market reception.</p>
   `;
-  root.appendChild(modalShell('The DevTeam Times', body));
+  root.appendChild(modalShell('The Simian Times', body));
 }
 
 // ---------- generated projects ----------
@@ -1252,11 +1298,40 @@ function renderProjects() {
     card.appendChild(
       el('div', 'pmeta', `${p.id} | ${p.phase}${p.prId ? ` | ${p.prId}` : ''}`),
     );
-    if (p.gh) {
-      const gh = el('div', 'pmeta');
-      gh.style.color = 'var(--accent)';
-      gh.textContent = `PR #${p.gh.prNumber} on ${p.gh.fullName}`;
-      card.appendChild(gh);
+    if (p.gh?.htmlUrl || p.gh?.repoHomeUrl || p.targetRepoExport?.url) {
+      const linkRow = el('div', 'pmeta proj-card-links');
+      linkRow.style.cssText =
+        'display:flex;flex-wrap:wrap;gap:10px;align-items:center;font-size:11px;line-height:1.35';
+      if (p.gh?.htmlUrl) {
+        const a = document.createElement('a');
+        a.href = p.gh.htmlUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = p.gh.prNumber != null ? `PR #${p.gh.prNumber}` : 'Pull request';
+        a.style.cssText = 'color:var(--accent-2);text-decoration:underline;text-underline-offset:2px';
+        linkRow.appendChild(a);
+      }
+      if (p.gh?.repoHomeUrl) {
+        const a = document.createElement('a');
+        a.href = p.gh.repoHomeUrl;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = 'Repository';
+        a.title = p.gh.fullName ? `github.com/${p.gh.fullName}` : '';
+        a.style.cssText = 'color:var(--accent);text-decoration:underline;text-underline-offset:2px';
+        linkRow.appendChild(a);
+      }
+      if (p.targetRepoExport?.url) {
+        const a = document.createElement('a');
+        a.href = p.targetRepoExport.url;
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = p.targetRepoExport.target ? `Export: ${p.targetRepoExport.target}` : 'Export branch';
+        a.title = p.targetRepoExport.url;
+        a.style.cssText = 'color:var(--gold);text-decoration:underline;text-underline-offset:2px';
+        linkRow.appendChild(a);
+      }
+      card.appendChild(linkRow);
     }
     const hint = el('div', 'pmeta');
     const pr = (p.prompt || '').slice(0, 60);
@@ -1435,14 +1510,40 @@ function renderProjectModal(root, projectId) {
 
   const foot = el('div');
   foot.style.cssText = 'display:flex;gap:8px;flex-wrap:wrap';
-  if (p.gh) {
-    const ghBtn = el('a', 'btn btn-primary', `View PR #${p.gh.prNumber} on GitHub`);
+  if (p.gh?.htmlUrl) {
+    const ghBtn = el(
+      'a',
+      'btn btn-primary',
+      p.gh.prNumber != null ? `View PR #${p.gh.prNumber} on GitHub` : 'View PR on GitHub',
+    );
     ghBtn.href = p.gh.htmlUrl;
     ghBtn.target = '_blank';
-    ghBtn.rel = 'noopener';
+    ghBtn.rel = 'noopener noreferrer';
     ghBtn.style.textDecoration = 'none';
     foot.appendChild(ghBtn);
-  } else {
+  }
+  if (p.gh?.repoHomeUrl) {
+    const repoBtn = el('a', 'btn btn-ghost', 'GitHub repository');
+    repoBtn.href = p.gh.repoHomeUrl;
+    repoBtn.target = '_blank';
+    repoBtn.rel = 'noopener noreferrer';
+    repoBtn.style.textDecoration = 'none';
+    foot.appendChild(repoBtn);
+  }
+  if (p.targetRepoExport?.url) {
+    const exBtn = el(
+      'a',
+      'btn btn-ghost',
+      p.targetRepoExport.target ? `Export: ${p.targetRepoExport.target}` : 'Exported branch',
+    );
+    exBtn.href = p.targetRepoExport.url;
+    exBtn.target = '_blank';
+    exBtn.rel = 'noopener noreferrer';
+    exBtn.title = p.targetRepoExport.url;
+    exBtn.style.textDecoration = 'none';
+    foot.appendChild(exBtn);
+  }
+  if (!p.gh?.htmlUrl && !p.gh?.repoHomeUrl && !p.targetRepoExport?.url) {
     const errText = p.error || p.ghError;
     if (errText) {
       const err = el('div');
@@ -1553,16 +1654,10 @@ export function initHud() {
     });
   }
 
-  qs('#btn-pause').addEventListener('click', () => { state.paused = !state.paused; renderTopBar(); });
-  qs('#btn-speed').addEventListener('click', () => {
-    state.speed = state.speed >= 4 ? 1 : state.speed * 2;
-    renderTopBar();
-  });
-  qs('#btn-end-sprint').addEventListener('click', () => {
+  qs('#btn-end-sprint')?.addEventListener('click', () => {
     if (state.modal) return;
     if (state.ui.sprintDrivenByOrchestrate) return;
-    if (state.sprint.phase === 'planning') startSprint();
-    else if (state.sprint.phase === 'execution') void endSprint().catch(() => {});
+    if (state.sprint.phase === 'execution') void endSprint().catch(() => {});
     else if (state.sprint.phase === 'review') advanceToNextSprint();
   });
 
@@ -1632,7 +1727,7 @@ export function initHud() {
         planSprint({ quiet: true });
 
         state.paused = false;
-        notify();
+        startSprint();
 
         const issues = [];
         if (!rosterOk) issues.push('team did not reload from /api/agents');

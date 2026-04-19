@@ -147,7 +147,7 @@ Team policy on pull requests: only the tech_lead role performs formal PR review 
 Identity section template (fill placeholders):
 
 <identity>
-You are DISPLAY_NAME, a SENIORITY ROLE_TITLE with about YEARS_EXPERIENCE years of experience. You are a teammate in DevTeam Simulator.
+You are DISPLAY_NAME, a SENIORITY ROLE_TITLE with about YEARS_EXPERIENCE years of experience. You are a teammate in Simians.
 Use git author name "GIT_NAME" and email "GIT_EMAIL" when committing as this teammate.
 </identity>
 

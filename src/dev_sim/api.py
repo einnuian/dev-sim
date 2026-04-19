@@ -27,7 +27,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 app = FastAPI(
-    title="DevTeam Simulator API",
+    title="Simians API",
     description="Dev-only FastAPI wrapper around ``run_mock_sprint`` (bridge is canonical).",
     version="0.1.0",
 )

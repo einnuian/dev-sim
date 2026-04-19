@@ -1,7 +1,7 @@
 {
   "name": "canvas-rotating-square",
   "version": "1.0.0",
-  "description": "Minimal 2D Canvas demo inspired by the Empty3D scaffold",
+  "description": "Simians — CEO Mode pixel studio sim (Vite + Canvas)",
   "type": "module",
   "scripts": {
     "dev": "vite",

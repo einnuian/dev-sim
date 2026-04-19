@@ -45,7 +45,7 @@ Expanded narrative on tensions and lessons lives in:
   - `prompts/roles/*.md` (per-role templates aligned with that baseline)
   - `prompts/personas/*.md` (persona-level voice and turn behavior)
   - `prompts/commits.md` (commit / PR title guidance, standard vs sass)
-- Evolved through several interpretations of "standard" (sprint one-liner vs Git tooling doc); settled on tooling-shaped role prompts with a DevTeam carve-out: team repo already exists, no `create_github_repository` for that product repo unless user explicitly wants a new unrelated repo (see role files).
+- Evolved through several interpretations of "standard" (sprint one-liner vs Git tooling doc); settled on tooling-shaped role prompts with a Simians carve-out: team repo already exists, no `create_github_repository` for that product repo unless user explicitly wants a new unrelated repo (see role files).
 - Removed `CHANNEL=...` sections from role prompts and dropped `{{CHANNEL}}` from persona/README placeholder lists; orchestrator must use another way to select standup vs implement vs review if needed.
 - Reformatted roles, personas, `prompts/README.md`, and `prompts/commits.md` into plain text (no `#` headers, no `**` emphasis, no tables) per latest style request—easier to inject wholesale into prompts.
 

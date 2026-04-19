@@ -10,7 +10,7 @@ from typing import Any
 
 from dev_sim.agent_run_logging import ensure_progress_logfile, progress_child_logger
 
-# Rotating lines per communication_style (DevTeam Simulator trait vocabulary).
+# Rotating lines per communication_style (Simians trait vocabulary).
 _ANNOUNCEMENT_BANKS: dict[str, list[str]] = {
     "terse": [
         "Still on it.",

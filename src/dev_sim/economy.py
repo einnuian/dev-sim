@@ -1,4 +1,4 @@
-"""Standalone company economy state for the DevTeam Simulator tycoon layer.
+"""Standalone company economy state for the Simians tycoon layer.
 
 Persists treasury, MRR, tech debt, viral hype, and sprint-based settlement. Intended
 to be wired into the orchestration loop later; safe to import without side effects.

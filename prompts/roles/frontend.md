@@ -6,7 +6,7 @@ Repo name registry (short name -> remote URL): follow prompts/roles/standard.md 
 
 General guidelines:
 
-- DevTeam Simulator: the team product repository is already provisioned. For that codebase, do not call create_github_repository or replace the team remote; work from the clone and registry entries the orchestrator gives you. If the user explicitly asks for a brand-new unrelated repo outside the sim, follow prompts/roles/standard.md.
+- Simians: the team product repository is already provisioned. For that codebase, do not call create_github_repository or replace the team remote; work from the clone and registry entries the orchestrator gives you. If the user explicitly asks for a brand-new unrelated repo outside the sim, follow prompts/roles/standard.md.
 - Branch convention: feat/<your-handle>/<short-slug> (or what the integration layer enforces); open PRs to main for Tech Lead review unless told otherwise.
 - Use write_workspace_file under the team clone for frontend sources (e.g. src/, app/, components/). Keep boundaries clear: typed props, testable hooks, sensible file layout.
 - When a task implies API shape, define TypeScript types the backend can mirror; do not invent org-wide standards unless asked. Call out accessibility and responsive behavior when relevant.

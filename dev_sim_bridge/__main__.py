@@ -8,7 +8,7 @@ from dev_sim_bridge.server import main as serve
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="HTTP bridge for DevTeam Simulator CEO UI → dev_sim agents")
+    p = argparse.ArgumentParser(description="HTTP bridge for Simians CEO UI → dev_sim agents")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8765)
     a = p.parse_args()

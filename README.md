@@ -1,4 +1,4 @@
-# DevTeam Simulator — Frontend (TM3)
+# Simians — Frontend (TM3)
 
 A pixel-art, top-down studio sim where you play the CEO of a tiny software
 company staffed by 5 AI engineers. They have personalities. They argue.
@@ -185,7 +185,7 @@ src/
          - uses: actions/upload-artifact@v4
            with: { name: web-dist, path: web/dist }
    ```
-5. Open the PR titled **"Frontend: DevTeam Simulator (CEO Mode) — TM3"** with a screen-recording.
+5. Open the PR titled **"Frontend: Simians (CEO Mode) — TM3"** with a screen-recording.
 
 ## Plug-in points for TM1, TM2, TM4
 

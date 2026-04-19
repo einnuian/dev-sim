@@ -67,6 +67,8 @@ function drawHair(ctx, x, y, scale, p) {
 
 function drawAcc(ctx, x, y, scale, p) {
   switch (p.acc) {
+    case 'none':
+      break;
     case 'glasses':
       rect(ctx, x + 5, y + 7, 3, 2, '#000', scale);
       rect(ctx, x + 8, y + 7, 3, 2, '#000', scale);
@@ -109,7 +111,8 @@ function rect(ctx, px, py, w, h, color, s) {
 
 // Sprite is 16x22 in source pixels.
 export function drawAgentSprite(ctx, x, y, scale, agent, walkFrame) {
-  drawHead(ctx, x, y, scale, agent.portrait);
+  const p = agent.portrait && typeof agent.portrait === 'object' ? agent.portrait : { hair: 'short', skin: 0, acc: 'none' };
+  drawHead(ctx, x, y, scale, p);
   drawBody(ctx, x, y, scale, agent.tint, walkFrame);
   // mood tint overlay
   if (agent.morale < -20) {

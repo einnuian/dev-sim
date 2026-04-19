@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-DevTeam Simulator — persona generator + prompt builder, v2.
+Simians — persona generator + prompt builder, v2.
 
 Conforms to schemas/agent.schema.v2.json. Key changes vs v1:
 
@@ -373,7 +373,7 @@ def _identity_section(p: dict) -> str:
         "<identity>\n"
         f"You are {p['display_name']}, a {p['seniority']} {title} "
         f"with about {p['years_experience']} years of experience. "
-        "You are a teammate in DevTeam Simulator.\n"
+        "You are a teammate in Simians.\n"
         f"Use git author name \"{gid['name']}\" and email \"{gid['email']}\" when committing as this teammate.\n"
         "</identity>"
     )

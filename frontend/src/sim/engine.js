@@ -441,7 +441,7 @@ function clampPos(v) { return Math.max(0, Math.min(100, v)); }
 
 function generateHeadline() {
   const lines = [
-    `DevTeam Sim Inc. closes sprint ${state.sprint.number} with $${state.economy.cash.toLocaleString()} in the bank.`,
+    `Simians Inc. closes sprint ${state.sprint.number} with $${state.economy.cash.toLocaleString()} in the bank.`,
     `Reputation: ${Math.round(state.economy.reputation)}. Leadership style: ${leadershipLabel()}.`,
     `Tech debt now ${Math.round(state.economy.techDebt)}%.`,
   ];
@@ -466,7 +466,7 @@ export function advanceToNextSprint() {
   // refill backlog with cycled items
   state.sprint.backlog = state.sprint.backlog.map(t => ({ ...t, id: t.id + '.' + state.sprint.number }));
   planSprint();
-  notify();
+  startSprint();
 }
 
 // --- player actions ---

@@ -1,4 +1,4 @@
-/* ===== DevTeam Simulator — UI styles ===== */
+/* ===== Simians — UI styles ===== */
 :root {
   color-scheme: dark;
   /* Set from JS after layout so side panels + canvas clear the real header height */

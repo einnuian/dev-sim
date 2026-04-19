@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DevTeam Simulator — CEO Mode</title>
+    <title>Simians — CEO Mode</title>
     <script>
       window.addEventListener("error", (event) => {
         if (event.target instanceof Element) return;
@@ -47,14 +47,14 @@
     </script>
   </head>
   <body>
-    <canvas id="stage" aria-label="DevTeam Simulator office"></canvas>
+    <canvas id="stage" aria-label="Simians office"></canvas>
 
     <!-- TOP BAR: company HUD -->
     <header id="topbar" class="hud">
       <div class="brand">
         <span class="logo">[ ]</span>
         <div>
-          <div class="company-name">DevTeam Sim Inc.</div>
+          <div class="company-name">Simians Inc.</div>
           <div class="tagline" id="tagline">Day 1 · Sprint 1 · Planning</div>
         </div>
       </div>
@@ -100,9 +100,7 @@
       <div class="sprint-ledger-strip" id="sprint-ledger-strip" aria-live="polite"></div>
       <div class="controls">
         <button id="btn-restart-game" type="button" class="btn btn-ghost btn-restart" title="Reset client state to Day 1 (see confirm dialog)">Restart</button>
-        <button id="btn-pause" type="button" class="btn btn-ghost" title="Keyboard: Space">|| Pause</button>
-        <button id="btn-speed" type="button" class="btn btn-ghost" title="Keyboard: 1 = 1x, 2 = 2x, 4 = 4x">&gt;&gt; 1x</button>
-        <button id="btn-end-sprint" class="btn btn-primary">End Sprint &gt;</button>
+        <button id="btn-end-sprint" type="button" class="btn btn-primary" style="display:none">End Sprint &gt;</button>
       </div>
     </header>
 

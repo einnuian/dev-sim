@@ -6,6 +6,7 @@ import { drawScene, agentAt } from './draw/scene.js';
 import { fetchCompanyState } from './api/economyApi.js';
 import { fetchDevTeamAgents } from './api/agentsApi.js';
 import { initHud } from './hud/render.js';
+import { initGameMusic } from './audio/gameMusic.js';
 import { tick } from './sim/engine.js';
 import { state, openModal, notify, applyBackendTeam, economyHydrateEpoch } from './state/store.js';
 
@@ -13,6 +14,7 @@ const { canvas, ctx } = createCanvasContext('#stage');
 const { viewport } = createResizer(canvas);
 
 initHud();
+initGameMusic();
 
 async function hydrateEconomyFromServer() {
   const epochAtStart = economyHydrateEpoch();

@@ -334,10 +334,22 @@ export async function runProject(prompt) {
 
   const lp = api.lastPr;
   if (lp?.html_url) {
+    const owner = String(lp.owner || '').trim();
+    const repo = String(lp.repo || '').trim();
+    const repoHomeUrl = owner && repo ? `https://github.com/${owner}/${repo}` : null;
     project.gh = {
       prNumber: lp.number,
-      fullName: lp.fullName || `${lp.owner}/${lp.repo}`,
+      fullName: lp.fullName || (owner && repo ? `${owner}/${repo}` : ''),
       htmlUrl: lp.html_url,
+      repoHomeUrl,
+    };
+  }
+
+  const tpExport = api.targetPush && typeof api.targetPush === 'object' ? api.targetPush : null;
+  if (tpExport && tpExport.ok === true && !tpExport.skipped && typeof tpExport.url === 'string' && tpExport.url.trim()) {
+    project.targetRepoExport = {
+      url: tpExport.url.trim(),
+      target: typeof tpExport.target === 'string' ? tpExport.target.trim() : '',
     };
   }
 
@@ -533,9 +545,8 @@ export async function runProject(prompt) {
     wins: review.wins,
   });
 
-  const tp = api.targetPush;
-  if (tp && tp.ok === true && !tp.skipped && tp.url) {
-    toast(`Hackathon export pushed to ${tp.target || 'GitHub'} — ${tp.url}`, 'good');
+  if (tpExport && tpExport.ok === true && !tpExport.skipped && tpExport.url) {
+    toast(`Hackathon export pushed to ${tpExport.target || 'GitHub'} — ${tpExport.url}`, 'good');
   }
 
   const otClear = document.getElementById('chat-expected-onetime');

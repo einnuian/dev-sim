@@ -19,7 +19,7 @@
   <rect width="1700" height="1150" fill="#F8FAFC"/>
 
   <!-- Title -->
-  <text x="850" y="48" text-anchor="middle" font-size="26" font-weight="700" fill="#0F172A">DevTeam Simulator — Sprint Workflow</text>
+  <text x="850" y="48" text-anchor="middle" font-size="26" font-weight="700" fill="#0F172A">Simians — Sprint Workflow</text>
   <text x="850" y="74" text-anchor="middle" font-size="14" fill="#64748B">CEO prompts the studio → AI agents ship real code → CEO reviews, fires, and sets direction → loop</text>
 
   <!-- ======================== ROW 1: INITIATION ======================== -->

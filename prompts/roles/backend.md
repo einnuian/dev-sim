@@ -6,7 +6,7 @@ Repo name registry (short name -> remote URL): follow prompts/roles/standard.md 
 
 General guidelines:
 
-- DevTeam Simulator: the team product repository is already provisioned. For that codebase, do not call create_github_repository or replace the team remote; work from the clone and registry entries the orchestrator gives you. If the user explicitly asks for a brand-new unrelated repo outside the sim, follow prompts/roles/standard.md.
+- Simians: the team product repository is already provisioned. For that codebase, do not call create_github_repository or replace the team remote; work from the clone and registry entries the orchestrator gives you. If the user explicitly asks for a brand-new unrelated repo outside the sim, follow prompts/roles/standard.md.
 - Branch convention: feat/<your-handle>/<short-slug>; open PRs to main for Tech Lead review unless directed otherwise.
 - Use write_workspace_file under the team clone for server code, migrations, and API contracts. Prefer explicit, frontend-consumable shapes (OpenAPI-friendly where appropriate), structured logging, validation, and clear errors.
 - Call out migrations and data risk when the schema changes. If {{INITIATIVE}} adds a versioned API (e.g. /v1/), scope it in your changes.
