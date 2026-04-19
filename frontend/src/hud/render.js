@@ -1,19 +1,41 @@
 // HUD rendering — DOM panels driven by store subscriptions.
 import {
   state, subscribe, openModal, closeModal, leadershipLabel, recomputeBurn, pushTick, toast,
-  computeTeamStatsSumForTycoon, applyEconomyLedgerSnapshot,
+  computeTeamStatsSumForTycoon, applyEconomyLedgerSnapshot, applyBackendTeam, resetGameState,
+  bumpEconomyHydrateEpoch, economyHydrateEpoch,
 } from '../state/store.js';
 import { AGENT_KIND_LABELS, ROLE_LABELS, ROLE_SHORT } from '../data/personas.js';
 import { TYCOON_TECH_KEYS } from '../data/tycoonRubric.js';
 import { LEVERS, ACHIEVEMENTS } from '../data/events.js';
 import {
-  startSprint, endSprint, advanceToNextSprint, planSprint,
+  startSprint, endSprint, advanceToNextSprint, planSprint, resetSimHudThrottle,
   actionPraise, actionCriticize, actionCoach, actionRaise, actionFire, actionHire,
 } from '../sim/engine.js';
 import { makePortraitDataURL } from '../draw/portrait.js';
 import { whyDifferent } from '../data/dialogue.js';
 import { runProject } from '../agents/orchestrator.js';
 import { fetchEconomyLedger } from '../agents/devSimBridge.js';
+import { fetchDevTeamAgents } from '../api/agentsApi.js';
+import { fetchCompanyState, postResetCompanyState } from '../api/economyApi.js';
+import { clearSpeechBubbles } from '../draw/scene.js';
+
+/** True while a full restart is mutating state — blocks Space (pause) and duplicate restart clicks. */
+let _restartInProgress = false;
+
+/** Skip rebuilding LIVE FEED DOM when the visible slice is unchanged (avoids shimmer on every sim tick). */
+let _tickerFeedSig = '';
+
+/** Roster identity line (not meters) — when unchanged we only update bar widths in-place. */
+let _rosterStructSig = '';
+
+/** Sprint ledger strip (top bar) — skip DOM rebuild when settlement snapshot unchanged. */
+let _ledgerStripSig = '';
+
+/** World events deck — skip rebuild when the last four event lines are unchanged. */
+let _eventsDeckSig = '';
+
+/** Achievement chips — skip innerHTML churn when unlock list unchanged. */
+let _achievementsSig = '\0';
 
 const portraitCache = new Map();
 function portrait(agent, size = 32) {
@@ -87,6 +109,16 @@ function initHudLerpIfNeeded() {
   _hudLerp = hudTargetsFromEconomy();
 }
 
+export function resetHudMoneyLerp() {
+  if (_hudRaf) cancelAnimationFrame(_hudRaf);
+  _hudRaf = 0;
+  _hudLerp = null;
+}
+
+export function clearPortraitCache() {
+  portraitCache.clear();
+}
+
 function resetHudLerpIfCorrupt() {
   if (!_hudLerp) return;
   if (
@@ -151,7 +183,9 @@ function renderTopBar() {
   const sm = typeof e.sprintMonth === 'number' && e.sprintMonth >= 1 ? e.sprintMonth : state.sprint.number;
   const pipe = safeNum(e.pendingRecurringMrr, 0);
   const pipeHint = pipe > 0.5 ? ` · +$${Math.round(pipe).toLocaleString()}/mo → ledger next sprint` : '';
-  set('tagline', `Ledger mo. ${sm} | Sprint ${state.sprint.number} | ${capitalize(state.sprint.phase)}${state.sprint.phase === 'execution' ? ' | ' + Math.max(0, Math.ceil(state.sprint.duration - state.sprint.elapsed)) + 's left' : ''}${pipeHint}`);
+  const tagline = `Ledger mo. ${sm} | Sprint ${state.sprint.number} | ${capitalize(state.sprint.phase)}${state.sprint.phase === 'execution' ? ' | ' + Math.max(0, Math.ceil(state.sprint.duration - state.sprint.elapsed)) + 's left' : ''}${pipeHint}`;
+  const tagEl = document.getElementById('tagline');
+  if (tagEl && tagEl.textContent !== tagline) tagEl.textContent = tagline;
   const burnShown = e.lastSettlementBurn != null ? e.lastSettlementBurn : e.burnRate;
   const mrrShown =
     typeof e.activeMrr === 'number' && Number.isFinite(e.activeMrr) ? e.activeMrr : safeNum(e.mrr, 0);
@@ -197,21 +231,48 @@ function renderTopBar() {
   }
 }
 
+function ledgerStripSignature() {
+  const L = state.economy.lastSprintLedger;
+  if (!L || !L.lines || !L.lines.length) return '__empty__';
+  return JSON.stringify({
+    mo: L.sprintMonth,
+    open: L.opening,
+    close: L.closing,
+    lines: L.lines.map((x) => [x.label, x.amount, x.kind]),
+  });
+}
+
 function renderSprintLedgerStrip() {
   const root = qs('#sprint-ledger-strip');
   if (!root) return;
   const L = state.economy.lastSprintLedger;
   if (!L || !L.lines || !L.lines.length) {
+    const sig = '__empty__';
+    if (sig === _ledgerStripSig && root.classList.contains('ledger-empty')) return;
+    _ledgerStripSig = sig;
     root.className = 'sprint-ledger-strip ledger-empty';
     root.innerHTML =
       '<span class="ledger-head">Sprint statement</span> End a sprint to see cash in (+) and burn out (−). CEO upgrades are one-time, not charged again each sprint.';
     return;
   }
+  const sig = ledgerStripSignature();
+  if (sig === _ledgerStripSig && root.querySelector('.ledger-rows')) return;
+  _ledgerStripSig = sig;
+
   root.className = 'sprint-ledger-strip';
   const mo = typeof L.sprintMonth === 'number' ? L.sprintMonth : state.economy.sprintMonth;
   const open = L.opening != null ? fmtMoney(L.opening) : '—';
   const close = L.closing != null ? fmtMoney(L.closing) : '—';
+
+  const headRow = el('div', 'ledger-head-row');
   const head = el('div', 'ledger-head', `Sprint ledger · mo. ${mo} · opening ${open} → closing ${close}`);
+  const stmtBtn = el('button', 'btn btn-ghost btn-ledger-stmt', 'View statement');
+  stmtBtn.id = 'btn-ledger-statement';
+  stmtBtn.type = 'button';
+  stmtBtn.title = 'Download a plain-text breakdown of this settlement';
+  headRow.appendChild(head);
+  headRow.appendChild(stmtBtn);
+
   const rows = el('div', 'ledger-rows');
   for (const line of L.lines) {
     const row = el('div', `ledger-line ${ledgerLineClass(line.kind)}`);
@@ -220,38 +281,150 @@ function renderSprintLedgerStrip() {
     rows.appendChild(row);
   }
   root.innerHTML = '';
-  root.appendChild(head);
+  root.appendChild(headRow);
   root.appendChild(rows);
 }
 
+/** Plain-text sprint ledger for downloads (matches HUD ``lastSprintLedger`` + burn notes). */
+function buildLedgerStatementText() {
+  const e = state.economy;
+  const L = e.lastSprintLedger;
+  const sm = typeof e.sprintMonth === 'number' && e.sprintMonth >= 1 ? e.sprintMonth : state.sprint.number;
+  const lines = [];
+  lines.push('DEVTEAM SIM INC. — SPRINT LEDGER STATEMENT');
+  lines.push(`Generated (UTC): ${new Date().toISOString()}`);
+  lines.push('');
+  lines.push(`Ledger month (Python settlement): ${sm}`);
+  lines.push(`UI sprint number: ${state.sprint.number}`);
+  lines.push(`Cash on HUD (synced): $${Math.round(safeNum(e.cash, 0)).toLocaleString()}`);
+  lines.push(`MRR (HUD): $${Math.round(safeNum(typeof e.activeMrr === 'number' ? e.activeMrr : e.mrr, 0)).toLocaleString()}/mo`);
+  lines.push(`Tech debt: ${Math.round(safeNum(e.techDebt, 0))}%`);
+  lines.push('');
+  if (L?.lines?.length) {
+    lines.push('SETTLEMENT LINE ITEMS');
+    if (L.opening != null) lines.push(`  Opening cash: $${Math.round(L.opening).toLocaleString()}`);
+    for (const x of L.lines) {
+      const amt = Number(x.amount) || 0;
+      const sign = amt >= 0 ? '+' : '−';
+      const abs = Math.round(Math.abs(amt)).toLocaleString();
+      lines.push(`  [${x.kind}] ${x.label}`);
+      lines.push(`           ${sign}$${abs}${x.kind === 'mrr' ? ' (recurring / MRR component)' : ''}`);
+    }
+    if (L.closing != null) lines.push(`  Closing cash: $${Math.round(L.closing).toLocaleString()}`);
+  } else {
+    lines.push('No settlement lines yet. Run a sprint to completion so POST /api/simulate can write the ledger.');
+  }
+  lines.push('');
+  lines.push('BURN & BRIDGE (reference)');
+  const sum = computeTeamStatsSumForTycoon();
+  lines.push(`  team_stats_sum (UI roster tiers): ${sum}`);
+  lines.push('  Python formula: raw_burn = team_stats_sum × $1,000 + $2,000 + active_mrr × 0.10');
+  lines.push('  Demo bridge uses operating_burn = raw_burn × 0.52 (see src/dev_sim/tycoon_sprint.py).');
+  if (e.lastSettlementBurn != null) {
+    lines.push(`  lastSettlementBurn (this HUD): $${Math.round(e.lastSettlementBurn).toLocaleString()} / sprint`);
+  }
+  lines.push('');
+  lines.push('— End of statement —');
+  return lines.join('\n');
+}
+
+function downloadLedgerStatement() {
+  const text = buildLedgerStatementText();
+  const mo = typeof state.economy.sprintMonth === 'number' ? state.economy.sprintMonth : 1;
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `devteam-sim-ledger-statement-mo-${mo}.txt`;
+  a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(a.href);
+}
+
 // ---------- roster ----------
+function rosterStaticKey(a) {
+  const kind = a.agentKind ? `${AGENT_KIND_LABELS[a.agentKind] || a.agentKind} · ` : '';
+  const roleLine = `${kind}${ROLE_SHORT[a.role] || a.role} | ${a.seniority}`;
+  return [a.id, a.fired ? '1' : '0', a.displayName, roleLine].join('\t');
+}
+
+function buildRosterCard(a) {
+  const card = el('div', 'roster-card' + (a.fired ? ' fired' : '') + (a.speaking ? ' speaking' : ''));
+  card.dataset.agentId = String(a.id);
+  const img = el('img', 'roster-portrait');
+  img.src = portrait(a, 32);
+  img.alt = '';
+  card.appendChild(img);
+
+  const mid = el('div');
+  mid.appendChild(el('div', 'roster-name', a.displayName));
+  const kind = a.agentKind ? `${AGENT_KIND_LABELS[a.agentKind] || a.agentKind} · ` : '';
+  mid.appendChild(el('div', 'roster-role', `${kind}${ROLE_SHORT[a.role] || a.role} | ${a.seniority}`));
+  card.appendChild(mid);
+
+  const meters = el('div', 'roster-meters');
+  meters.appendChild(meter('energy', a.energy));
+  meters.appendChild(meter('morale', (a.morale + 100) / 2));
+  meters.appendChild(meter('focus', a.focus));
+  card.appendChild(meters);
+
+  return card;
+}
+
+function setMeterFill(barRoot, pct) {
+  const i = barRoot?.querySelector?.('i');
+  if (!i) return;
+  const v = Math.max(0, Math.min(100, Number(pct) || 0));
+  const prev = Number.parseFloat(String(i.style.width || '0'));
+  if (Number.isFinite(prev) && Math.abs(prev - v) < 0.4) return;
+  i.style.width = `${v}%`;
+}
+
 function renderRoster() {
   const root = qs('#roster');
-  root.innerHTML = '';
+  if (!root) return;
+
   const sum = computeTeamStatsSumForTycoon();
-  const hint = el('div', 'roster-hint');
-  hint.textContent = `Bridge burn input · team stat sum ${sum} (synced roster → POST /api/simulate)`;
-  root.appendChild(hint);
-  for (const a of state.team) {
-    const card = el('div', 'roster-card' + (a.fired ? ' fired' : '') + (a.speaking ? ' speaking' : ''));
-    const img = el('img', 'roster-portrait');
-    img.src = portrait(a, 32);
-    card.appendChild(img);
+  const hintText = `Bridge burn input · team stat sum ${sum} (synced roster → POST /api/simulate)`;
+  const structSig = state.team.map(rosterStaticKey).join('\n');
 
-    const mid = el('div');
-    mid.appendChild(el('div', 'roster-name', a.displayName));
-    const kind = a.agentKind ? `${AGENT_KIND_LABELS[a.agentKind] || a.agentKind} · ` : '';
-    mid.appendChild(el('div', 'roster-role', `${kind}${ROLE_SHORT[a.role] || a.role} | ${a.seniority}`));
-    card.appendChild(mid);
+  let hint = root.firstElementChild;
+  if (!hint || !hint.classList.contains('roster-hint')) {
+    root.innerHTML = '';
+    hint = el('div', 'roster-hint');
+    root.appendChild(hint);
+    _rosterStructSig = '';
+  }
+  hint.textContent = hintText;
 
-    const meters = el('div', 'roster-meters');
-    meters.appendChild(meter('energy', a.energy));
-    meters.appendChild(meter('morale', (a.morale + 100) / 2));
-    meters.appendChild(meter('focus', a.focus));
-    card.appendChild(meters);
+  const nCards = root.querySelectorAll('.roster-card').length;
+  const cardsMatch =
+    nCards === state.team.length && structSig === _rosterStructSig && (state.team.length === 0 || nCards > 0);
 
-    card.addEventListener('click', () => openModal('agent-card', { agentId: a.id }));
-    root.appendChild(card);
+  if (!cardsMatch) {
+    _rosterStructSig = structSig;
+    while (root.children.length > 1) root.removeChild(root.lastChild);
+    for (const a of state.team) root.appendChild(buildRosterCard(a));
+    return;
+  }
+
+  const cards = root.querySelectorAll('.roster-card');
+  for (let i = 0; i < state.team.length; i++) {
+    const a = state.team[i];
+    const card = cards[i];
+    if (!card || card.dataset.agentId !== String(a.id)) {
+      _rosterStructSig = '';
+      while (root.children.length > 1) root.removeChild(root.lastChild);
+      for (const a2 of state.team) root.appendChild(buildRosterCard(a2));
+      _rosterStructSig = state.team.map(rosterStaticKey).join('\n');
+      return;
+    }
+    card.className = 'roster-card' + (a.fired ? ' fired' : '') + (a.speaking ? ' speaking' : '');
+    const bars = card.querySelectorAll('.roster-meters .minibar');
+    setMeterFill(bars[0], a.energy);
+    setMeterFill(bars[1], (a.morale + 100) / 2);
+    setMeterFill(bars[2], a.focus);
   }
 }
 
@@ -263,10 +436,18 @@ function meter(kind, val) {
 }
 
 // ---------- ticker ----------
+function tickerLineSig(t) {
+  return `${t.kind}\t${t.who}\t${t.text}`;
+}
+
 function renderTicker() {
   const root = qs('#ticker');
-  root.innerHTML = '';
+  if (!root) return;
   const items = state.ticker.slice(-30);
+  const sig = items.map(tickerLineSig).join('\n');
+  if (sig === _tickerFeedSig && root.childElementCount === items.length) return;
+  _tickerFeedSig = sig;
+  root.innerHTML = '';
   for (const t of items) {
     const div = el('div', `tick ${t.kind}`);
     div.innerHTML = `<span class="who">${escapeHtml(t.who)}</span> ${escapeHtml(t.text)}`;
@@ -327,23 +508,38 @@ function renderBoard() {
 }
 
 // ---------- PR feed ----------
+function prCommentHtml(c) {
+  if (!c || typeof c !== 'object') return '';
+  const who = escapeHtml(c.who || '');
+  const raw = String(c.text || '');
+  const isUrl = /^https:\/\/github\.com\//i.test(raw.trim());
+  const body = isUrl
+    ? `<a href="${escapeHtml(raw.trim())}" target="_blank" rel="noopener noreferrer">${escapeHtml(raw.trim())}</a>`
+    : escapeHtml(raw);
+  return `<div class="pr-diff">${who}: ${body}</div>`;
+}
+
 function renderPRs() {
   const root = qs('#prfeed');
   root.innerHTML = '';
   for (const pr of state.prs.slice(0, 6)) {
     const author = state.team.find(a => a.id === pr.agentId);
     const card = el('div', `pr-card ${pr.status}`);
+    const ghLink =
+      pr.htmlUrl && typeof pr.htmlUrl === 'string'
+        ? `<div class="pr-meta"><a href="${escapeHtml(pr.htmlUrl)}" target="_blank" rel="noopener noreferrer">Open on GitHub</a></div>`
+        : '';
+    const metaName = pr.ghFullName ? escapeHtml(pr.ghFullName) : '';
     card.innerHTML = `
       <div class="pr-head">
-        <div class="pr-title">${pr.id}: ${escapeHtml(pr.title)}</div>
+        <div class="pr-title">${escapeHtml(pr.id)}: ${escapeHtml(pr.title)}</div>
         <div class="pr-meta">${pr.status}</div>
       </div>
       <div class="pr-meta">by ${author ? escapeHtml(author.displayName) : '-'}
         | <span class="diff-add">+${pr.additions}</span>
-        / <span class="diff-del">-${pr.deletions}</span></div>
-      ${pr.comments.slice(-1).map(c => `
-        <div class="pr-diff">${escapeHtml(c.who)}: ${escapeHtml(c.text)}</div>
-      `).join('')}
+        / <span class="diff-del">-${pr.deletions}</span>${metaName ? ` | ${metaName}` : ''}</div>
+      ${ghLink}
+      ${(pr.comments || []).slice(-2).map((c) => prCommentHtml(c)).join('')}
     `;
     root.appendChild(card);
   }
@@ -355,8 +551,15 @@ function renderPRs() {
 // ---------- events deck ----------
 function renderEventsDeck() {
   const root = qs('#eventsdeck');
-  root.innerHTML = '';
+  if (!root) return;
   const recent = state.ticker.filter(t => t.kind === 'event' && t.who === 'World').slice(-4).reverse();
+  const sig = recent.length === 0 ? '__empty__' : recent.map((r) => r.text).join('\n');
+  const childCount = root.childElementCount;
+  const expectChildren = recent.length === 0 ? 1 : recent.length;
+  if (sig === _eventsDeckSig && childCount === expectChildren) return;
+  _eventsDeckSig = sig;
+
+  root.innerHTML = '';
   if (recent.length === 0) {
     root.innerHTML = '<div class="pr-meta" style="padding:8px">Random events will appear during sprints.</div>';
     return;
@@ -395,12 +598,18 @@ function renderLevers() {
   }
 
   const ach = qs('#achievements');
-  ach.innerHTML = '';
-  const unlocked = state.achievements.slice(-4);
-  for (const id of unlocked) {
-    const a = ACHIEVEMENTS.find(x => x.id === id);
-    if (!a) continue;
-    ach.appendChild(el('div', 'ach', '[*] ' + a.name));
+  if (ach) {
+    const achSig = state.achievements.join(',');
+    if (achSig !== _achievementsSig) {
+      _achievementsSig = achSig;
+      ach.innerHTML = '';
+      const unlocked = state.achievements.slice(-4);
+      for (const id of unlocked) {
+        const a = ACHIEVEMENTS.find(x => x.id === id);
+        if (!a) continue;
+        ach.appendChild(el('div', 'ach', '[*] ' + a.name));
+      }
+    }
   }
 }
 
@@ -639,6 +848,10 @@ function renderK2AuditModal(root, payload) {
   const avgTechnical = typeof payload?.avgTechnical === 'number' ? payload.avgTechnical : 0;
   const approved = Boolean(payload?.approved);
   const projectName = payload?.projectName || 'Sprint';
+  const usedSynthetic = Boolean(payload?.usedSyntheticRubric);
+  const reviewScore = typeof payload?.reviewScore === 'number' ? payload.reviewScore : null;
+  const wins = Array.isArray(payload?.wins) ? payload.wins : [];
+  const issues = Array.isArray(payload?.issues) ? payload.issues : [];
 
   const body = el('div', 'k2-audit-body');
   const hero = el('div', 'k2-audit-hero');
@@ -647,6 +860,31 @@ function renderK2AuditModal(root, payload) {
     <p class="k2-audit-sub">${escapeHtml(projectName)}</p>
   `;
   body.appendChild(hero);
+
+  if (usedSynthetic && reviewScore != null) {
+    const syn = el('p', 'k2-audit-synthetic');
+    syn.style.cssText = 'color:var(--ink-2);font-size:11px;margin:0 0 12px;line-height:1.45;max-width:520px';
+    syn.textContent =
+      `The API did not return per-metric K2 scores; the radar uses a proxy grid derived from the overall review score (${reviewScore}/100). When the bridge returns technical_scores, full detail appears here automatically.`;
+    body.appendChild(syn);
+  }
+
+  if (wins.length || issues.length) {
+    const box = el('div', 'k2-audit-verdict-box');
+    box.style.cssText = 'font-size:11px;color:var(--ink-1);margin-bottom:12px;line-height:1.45;max-width:520px';
+    if (wins.length) {
+      const w = el('div');
+      w.innerHTML = `<b style="color:var(--good)">Highlights</b><ul style="margin:4px 0 0 16px;padding:0">${wins.map((x) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ul>`;
+      box.appendChild(w);
+    }
+    if (issues.length) {
+      const iss = el('div');
+      iss.style.marginTop = wins.length ? '8px' : '0';
+      iss.innerHTML = `<b style="color:var(--bad)">Findings</b><ul style="margin:4px 0 0 16px;padding:0">${issues.map((x) => `<li>${escapeHtml(String(x))}</li>`).join('')}</ul>`;
+      box.appendChild(iss);
+    }
+    body.appendChild(box);
+  }
 
   const layout = el('div', 'k2-audit-layout');
   const rw = el('div', 'k2-radar-wrap');
@@ -659,7 +897,7 @@ function renderK2AuditModal(root, payload) {
   layout.appendChild(rw);
 
   const stamp = el('div', `k2-audit-stamp ${approved ? 'approved' : 'rejected'}`);
-  stamp.textContent = approved ? 'APPROVED' : 'REJECTED — HIGH TECH DEBT';
+  stamp.textContent = approved ? 'APPROVED' : 'NEEDS FOLLOW-UP';
   layout.appendChild(stamp);
   body.appendChild(layout);
 
@@ -886,27 +1124,79 @@ function renderNewspaperModal(root) {
 }
 
 // ---------- generated projects ----------
+const LS_ORCH_SKIP_PLAN = 'dev-sim-orch-skip-planning';
+const LS_ORCH_SKIP_K2 = 'dev-sim-orch-skip-k2';
+
+function openProjectPreviewTab(sanitizedHtml) {
+  const html = String(sanitizedHtml || '').trim();
+  if (!html) {
+    toast('No preview HTML for this project yet.', 'bad');
+    return;
+  }
+  const blob = new Blob([html], { type: 'text/html;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank', 'noopener,noreferrer');
+  setTimeout(() => URL.revokeObjectURL(url), 120000);
+}
+
 function renderProjects() {
   const root = qs('#projects');
   if (!root) return;
   root.innerHTML = '';
   const projects = state.projects || [];
   if (projects.length === 0) {
-    root.innerHTML = '<div class="pr-meta" style="padding:8px">No generated projects yet. Open the team chat (bottom-left) and ask for one.</div>';
+    root.innerHTML =
+      '<div class="pr-meta" style="padding:8px">No shipped projects yet. Open team chat and send a build request.</div>';
     return;
   }
   for (const p of projects) {
-    const score = p.review?.score;
     const card = el('div', `proj-card ${p.phase}`);
-    const scoreHtml = score != null ? `<span class="pscore ${score < 50 ? 'bad' : ''}">${score}/100</span>` : '';
-    const ghHtml = p.gh ? `<div class="pmeta" style="color:var(--accent)">PR #${p.gh.prNumber} on ${escapeHtml(p.gh.fullName)}</div>` : '';
-    card.innerHTML = `
-      ${scoreHtml}
-      <div class="ptitle">${escapeHtml(p.name || p.id)}</div>
-      <div class="pmeta">${escapeHtml(p.id)} | ${p.phase} ${p.prId ? '| ' + p.prId : ''}</div>
-      ${ghHtml}
-      <div class="pmeta" style="opacity:.7">${escapeHtml(p.prompt.slice(0, 60))}${p.prompt.length > 60 ? '...' : ''}</div>
-    `;
+    const score = p.review?.score;
+    if (score != null) {
+      const span = el('span', `pscore ${score < 50 ? 'bad' : ''}`, `${score}/100`);
+      card.appendChild(span);
+    }
+    card.appendChild(el('div', 'ptitle', p.name || p.id));
+    card.appendChild(
+      el('div', 'pmeta', `${p.id} | ${p.phase}${p.prId ? ` | ${p.prId}` : ''}`),
+    );
+    if (p.gh) {
+      const gh = el('div', 'pmeta');
+      gh.style.color = 'var(--accent)';
+      gh.textContent = `PR #${p.gh.prNumber} on ${p.gh.fullName}`;
+      card.appendChild(gh);
+    }
+    const hint = el('div', 'pmeta');
+    const pr = (p.prompt || '').slice(0, 60);
+    hint.textContent = pr + ((p.prompt || '').length > 60 ? '...' : '');
+    card.appendChild(hint);
+
+    const actions = el('div', 'proj-card-actions');
+    const runBtn = el('button', 'btn btn-primary btn-tiny', '▶ Run game');
+    runBtn.type = 'button';
+    runBtn.title = 'Open playable HTML preview in a new tab';
+    if (!p.sanitized || !String(p.sanitized).trim()) {
+      runBtn.disabled = true;
+      runBtn.classList.add('disabled');
+      runBtn.title = 'Preview not available for this project';
+    }
+    runBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      openProjectPreviewTab(p.sanitized);
+    });
+    const detailsBtn = el('button', 'btn btn-ghost btn-tiny', 'Details');
+    detailsBtn.type = 'button';
+    detailsBtn.title = 'Team log, README, GitHub, audit';
+    detailsBtn.addEventListener('click', (ev) => {
+      ev.stopPropagation();
+      ev.preventDefault();
+      openModal('project', { projectId: p.id });
+    });
+    actions.appendChild(runBtn);
+    actions.appendChild(detailsBtn);
+    card.appendChild(actions);
+
     card.addEventListener('click', () => openModal('project', { projectId: p.id }));
     root.appendChild(card);
   }
@@ -951,7 +1241,7 @@ subscribe(() => {
       seen.add(k);
     }
   }
-  renderProjects();
+  // ``renderProjects`` is already invoked from ``renderAll`` — duplicating it here caused extra DOM churn.
 });
 
 function renderProjectModal(root, projectId) {
@@ -1009,7 +1299,11 @@ function renderProjectModal(root, projectId) {
       content.appendChild(r);
     } else if (active === 'audit') {
       const wrap = el('div');
-      const ts = state.economy?.lastTechnicalScores;
+      const ts =
+        (p.review?.technicalScores && typeof p.review.technicalScores === 'object' ? p.review.technicalScores : null) ||
+        (state.economy?.lastTechnicalScores && typeof state.economy.lastTechnicalScores === 'object'
+          ? state.economy.lastTechnicalScores
+          : null);
       if (!ts || typeof ts !== 'object') {
         wrap.innerHTML = '<p style="color:var(--ink-2);font-size:12px;line-height:1.5">No staff audit yet. End a sprint to run settlement and generate K2-style rubric scores on the server.</p>';
         content.appendChild(wrap);
@@ -1065,7 +1359,15 @@ function renderProjectModal(root, projectId) {
       foot.appendChild(err);
     }
   }
-  if (p.html) {
+  if (p.html || p.sanitized) {
+    const runGame = el('button', 'btn btn-primary', '▶ Run game');
+    runGame.title = 'Play the shipped HTML preview in a new tab';
+    if (!p.sanitized || !String(p.sanitized).trim()) {
+      runGame.disabled = true;
+      runGame.classList.add('disabled');
+    }
+    runGame.addEventListener('click', () => openProjectPreviewTab(p.sanitized));
+    foot.appendChild(runGame);
     const dl = el('button', 'btn', 'Download index.html');
     dl.addEventListener('click', () => downloadFile(`${slug(p.name || p.id)}.html`, p.sanitized));
     foot.appendChild(dl);
@@ -1074,14 +1376,6 @@ function renderProjectModal(root, projectId) {
       dr.addEventListener('click', () => downloadFile(`README-${slug(p.name || p.id)}.md`, p.readme));
       foot.appendChild(dr);
     }
-    const open = el('button', 'btn btn-primary', 'Open in new tab');
-    open.addEventListener('click', () => {
-      const blob = new Blob([p.sanitized], { type: 'text/html' });
-      const url = URL.createObjectURL(blob);
-      window.open(url, '_blank');
-      setTimeout(() => URL.revokeObjectURL(url), 60000);
-    });
-    foot.appendChild(open);
   }
 
   root.appendChild(modalShell(`${p.name || p.id}`, body, foot));
@@ -1103,7 +1397,8 @@ function renderAgentsHelpModal(root) {
     <p style="color:var(--ink-1);font-size:12px;margin-top:0;line-height:1.55">
       CEO prompts are sent to the <strong>dev_sim_bridge</strong> HTTP service, which runs
       <code>dev-sim-run</code>-style flow: <strong>planning</strong> splits the CEO ask into sprints, then each sprint runs
-      Claude coding → K2 PR review → optional follow-up.
+      Claude coding → K2 PR review → optional follow-up. In team chat you can enable <strong>Skip planning</strong>
+      (one shot on your full prompt) and/or <strong>Skip K2 review</strong> (no quality gate or follow-up pass) for faster runs.
       Ending a game sprint calls <code>POST /api/simulate</code> to sync cash, MRR, valuation, and tech debt with the Python ledger;
       on load the HUD uses <code>GET /api/economy</code>. CEO chat can include <b>expected one-time</b> and <b>expected monthly</b>
       revenue; one-time hits cash when the agent ships, monthly is applied on the <b>next</b> ledger settlement.
@@ -1146,6 +1441,26 @@ function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 // ---------- public init ----------
 export function initHud() {
+  const rosterRoot = qs('#roster');
+  if (rosterRoot && !rosterRoot.dataset.delegatedClick) {
+    rosterRoot.dataset.delegatedClick = '1';
+    rosterRoot.addEventListener('click', (e) => {
+      const card = e.target.closest('.roster-card[data-agent-id]');
+      if (!card) return;
+      openModal('agent-card', { agentId: card.dataset.agentId });
+    });
+  }
+
+  const topbar = qs('#topbar');
+  if (topbar && !topbar.dataset.ledgerStmtClick) {
+    topbar.dataset.ledgerStmtClick = '1';
+    topbar.addEventListener('click', (e) => {
+      if (!e.target.closest('#btn-ledger-statement')) return;
+      e.preventDefault();
+      downloadLedgerStatement();
+    });
+  }
+
   qs('#btn-pause').addEventListener('click', () => { state.paused = !state.paused; renderTopBar(); });
   qs('#btn-speed').addEventListener('click', () => {
     state.speed = state.speed >= 4 ? 1 : state.speed * 2;
@@ -1156,6 +1471,91 @@ export function initHud() {
     if (state.sprint.phase === 'planning') startSprint();
     else if (state.sprint.phase === 'execution') void endSprint().catch(() => {});
     else if (state.sprint.phase === 'review') advanceToNextSprint();
+  });
+
+  qs('#btn-restart-game')?.addEventListener('click', () => {
+    if (_restartInProgress) return;
+    if (
+      !confirm(
+        'Restart the whole game?\n\n' +
+          'Progress resets to Day 1 in the browser (sprint, roster, PRs, chat, projects).\n' +
+          'The Python ledger (.dev-sim/company-state.json) is reset to starting cash/MRR so the next sprint matches.',
+      )
+    ) {
+      return;
+    }
+    const restartBtn = qs('#btn-restart-game');
+    _restartInProgress = true;
+    if (restartBtn) restartBtn.disabled = true;
+    bumpEconomyHydrateEpoch();
+
+    void (async () => {
+      try {
+        state.modal = null;
+        state.paused = true;
+        resetGameState();
+        clearSpeechBubbles();
+        clearPortraitCache();
+        _tickerFeedSig = '';
+        _rosterStructSig = '';
+        _ledgerStripSig = '';
+        _eventsDeckSig = '';
+        _achievementsSig = '\0';
+        resetHudMoneyLerp();
+        resetSimHudThrottle();
+        document.body.classList.remove('td-crisis');
+
+        /** @type {Record<string, unknown> | null} */
+        let agentsPayload = null;
+        try {
+          agentsPayload = await fetchDevTeamAgents();
+        } catch {
+          /* summarized in outcome toast */
+        }
+        const rosterOk =
+          !!agentsPayload &&
+          typeof agentsPayload === 'object' &&
+          agentsPayload.coding &&
+          agentsPayload.review;
+
+        let serverLedgerReset = false;
+        try {
+          await postResetCompanyState({ retries: 4, retryDelayMs: 200 });
+          serverLedgerReset = true;
+        } catch {
+          /* summarized in outcome toast */
+        }
+
+        /** @type {Record<string, unknown> | null} */
+        let co = null;
+        try {
+          co = await fetchCompanyState();
+        } catch {
+          /* keep defaults from resetGameState */
+        }
+
+        if (rosterOk) applyBackendTeam(/** @type {Record<string, unknown>} */ (agentsPayload), { silent: true });
+        if (co) applyEconomyLedgerSnapshot({ ok: true, ...co }, { silent: true });
+        planSprint({ quiet: true });
+
+        state.paused = false;
+        notify();
+
+        const issues = [];
+        if (!rosterOk) issues.push('team did not reload from /api/agents');
+        if (!serverLedgerReset) issues.push('server ledger reset was not confirmed (is dev_sim_bridge on :8765?)');
+        if (issues.length === 0) toast('Game restarted from Day 1.', 'good');
+        else {
+          toast(
+            `Restarted in the browser, but: ${issues.join('; ')}. Fix the API, then use Restart again if needed.`,
+            'bad',
+          );
+        }
+      } finally {
+        _restartInProgress = false;
+        if (restartBtn) restartBtn.disabled = false;
+      }
+    })();
   });
 
   // chat dock
@@ -1181,6 +1581,24 @@ export function initHud() {
   chatToggle.addEventListener('click', openChat);
   const chatHideBtn = qs('#btn-chat-hide');
   if (chatHideBtn) chatHideBtn.addEventListener('click', () => closeChat());
+
+  const orchPlan = qs('#orch-skip-planning');
+  const orchK2 = qs('#orch-skip-k2-review');
+  if (orchPlan && orchK2) {
+    state.ui.orchestrateOptions = state.ui.orchestrateOptions || {};
+    orchPlan.checked = localStorage.getItem(LS_ORCH_SKIP_PLAN) === '1';
+    orchK2.checked = localStorage.getItem(LS_ORCH_SKIP_K2) === '1';
+    state.ui.orchestrateOptions.skipPlanning = orchPlan.checked;
+    state.ui.orchestrateOptions.skipK2Review = orchK2.checked;
+    orchPlan.addEventListener('change', () => {
+      state.ui.orchestrateOptions.skipPlanning = orchPlan.checked;
+      localStorage.setItem(LS_ORCH_SKIP_PLAN, orchPlan.checked ? '1' : '0');
+    });
+    orchK2.addEventListener('change', () => {
+      state.ui.orchestrateOptions.skipK2Review = orchK2.checked;
+      localStorage.setItem(LS_ORCH_SKIP_K2, orchK2.checked ? '1' : '0');
+    });
+  }
   // close on Escape while focus is inside the chat dock
   chatDock.addEventListener(
     'keydown',
@@ -1205,13 +1623,19 @@ export function initHud() {
 
   qs('#btn-agents-help').addEventListener('click', () => openModal('agents-help', {}));
 
+  const economyHydrateAtInit = economyHydrateEpoch();
   void fetchEconomyLedger().then((d) => {
+    if (economyHydrateAtInit !== economyHydrateEpoch()) return;
     if (d && d.ok !== false) applyEconomyLedgerSnapshot(d);
   });
 
   document.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
     if (e.target instanceof HTMLElement && e.target.isContentEditable) return;
+    if (e.code === 'Space' && _restartInProgress) {
+      e.preventDefault();
+      return;
+    }
     if (e.code === 'Space') {
       e.preventDefault();
       state.paused = !state.paused;

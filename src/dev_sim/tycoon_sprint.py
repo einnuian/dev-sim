@@ -34,6 +34,27 @@ def _load_company_or_fresh(path: Path) -> CompanyState:
         return CompanyState()
 
 
+def _company_state_day_one_seed() -> CompanyState:
+    """Day-1 ledger aligned with the CEO canvas ``resetGameState`` (defined here to avoid import drift)."""
+    return CompanyState(
+        balance=200_000.0,
+        active_mrr=3_000.0,
+        tech_debt=0.0,
+        hype_multiplier=1.0,
+        sprint_month=1,
+        valuation=0.0,
+        pending_recurring_mrr=0.0,
+    )
+
+
+def reset_company_state_file() -> CompanyState:
+    """Overwrite ``company-state.json`` with Day 1 values (CEO UI restart + ``run_mock_sprint`` in sync)."""
+    path = company_state_path()
+    company = _company_state_day_one_seed()
+    company.save_state(path)
+    return company
+
+
 def _mock_technical_scores() -> dict[str, int]:
     """Random rubric scores for rapid UI iteration (no K2 / Claude)."""
     return {k: random.randint(1, 10) for k in TECHNICAL_SCORE_KEYS}
@@ -139,5 +160,6 @@ def run_mock_sprint(
 __all__ = [
     "apply_shipped_product_economics",
     "company_state_path",
+    "reset_company_state_file",
     "run_mock_sprint",
 ]

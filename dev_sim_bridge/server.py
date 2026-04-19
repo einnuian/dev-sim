@@ -171,6 +171,21 @@ class BridgeHandler(BaseHTTPRequestHandler):
         out["persisted"] = persisted
         self._send(200, json.dumps(out).encode("utf-8"))
 
+    def _handle_company_reset(self) -> None:
+        """POST /api/company/reset — overwrite ``company-state.json`` with Day 1 defaults."""
+        os.chdir(REPO_ROOT)
+        from dev_sim.tycoon_sprint import reset_company_state_file
+
+        try:
+            company = reset_company_state_file()
+        except (OSError, TypeError, ValueError) as e:
+            self._send(500, json.dumps({"ok": False, "error": str(e)}).encode("utf-8"))
+            return
+        out: dict[str, Any] = asdict(company)
+        out["persisted"] = True
+        out["ok"] = True
+        self._send(200, json.dumps(out).encode("utf-8"))
+
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
         length = int(self.headers.get("Content-Length") or 0)
@@ -179,6 +194,10 @@ class BridgeHandler(BaseHTTPRequestHandler):
             body = json.loads(raw.decode("utf-8"))
         except json.JSONDecodeError:
             self._send(400, json.dumps({"ok": False, "error": "invalid JSON"}).encode("utf-8"))
+            return
+
+        if parsed.path == "/api/company/reset":
+            self._handle_company_reset()
             return
 
         if parsed.path == "/api/simulate":
@@ -225,6 +244,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
 
             coding_p = body.get("coding") if isinstance(body.get("coding"), dict) else None
             review_p = body.get("review") if isinstance(body.get("review"), dict) else None
+            skip_planning = bool(body.get("skip_planning"))
+            skip_k2_review = bool(body.get("skip_k2_review"))
 
             try:
                 return run_planned_orchestrate_for_prompt(
@@ -235,6 +256,8 @@ class BridgeHandler(BaseHTTPRequestHandler):
                     expected_monthly=exp_mo,
                     coding_persona=coding_p,
                     review_persona=review_p,
+                    skip_planning=skip_planning,
+                    skip_k2_review=skip_k2_review,
                 )
             except Exception as e:  # noqa: BLE001 — surface to UI
                 return {"ok": False, "error": f"{type(e).__name__}: {e}"}
@@ -316,6 +339,7 @@ def main(host: str = "127.0.0.1", port: int = 8765) -> None:
     print("  GET  /api/health", file=sys.stderr)
     print("  GET  /api/economy   (company-state.json for HUD sync)", file=sys.stderr)
     print("  GET  /api/company   (CompanyState JSON + persisted, same as run_api.py)", file=sys.stderr)
+    print("  POST /api/company/reset  (overwrite company-state.json with Day 1 defaults)", file=sys.stderr)
     print("  GET  /api/agents  optional ?seed=int", file=sys.stderr)
     try:
         httpd.serve_forever()

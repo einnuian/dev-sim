@@ -79,17 +79,13 @@ def _parse_sprints(text: str) -> list[dict[str, Any]]:
     raise ValueError("No valid JSON sprint list found in planner response")
 
 
-def run_planning_agent(
+def planning_decompose(
     idea: str,
     *,
     model: str | None = None,
     planning_prompt_path: Path | None = None,
-) -> list[dict[str, Any]]:
-    """Decompose *idea* into an ordered list of sprint dicts.
-
-    Each dict has ``number`` (int), ``title`` (str), and ``prompt`` (str).
-    The planner makes a single one-shot call — no tool loop.
-    """
+) -> tuple[list[dict[str, Any]], str]:
+    """Return ``(sprints, raw_model_text)`` for UI + sprint board sync."""
     resolved_model = resolve_coding_model(model)
     system_prompt = _load_system_prompt(planning_prompt_path)
 
@@ -104,7 +100,22 @@ def run_planning_agent(
     text = "".join(block.text for block in response.content if hasattr(block, "text"))
     print(text, file=sys.stderr)
 
-    return _parse_sprints(text)
+    return _parse_sprints(text), text
+
+
+def run_planning_agent(
+    idea: str,
+    *,
+    model: str | None = None,
+    planning_prompt_path: Path | None = None,
+) -> list[dict[str, Any]]:
+    """Decompose *idea* into an ordered list of sprint dicts.
+
+    Each dict has ``number`` (int), ``title`` (str), and ``prompt`` (str).
+    The planner makes a single one-shot call — no tool loop.
+    """
+    sprints, _ = planning_decompose(idea, model=model, planning_prompt_path=planning_prompt_path)
+    return sprints
 
 
 def main() -> None:
@@ -142,7 +153,7 @@ def main() -> None:
         print("Provide an idea as an argument or use --idea-file.", file=sys.stderr)
         sys.exit(2)
 
-    sprints = run_planning_agent(
+    sprints, _ = planning_decompose(
         idea,
         model=args.model,
         planning_prompt_path=args.planning_prompt,

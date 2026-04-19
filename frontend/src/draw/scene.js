@@ -121,6 +121,14 @@ bubbleStyle.textContent = `
 `;
 document.head.appendChild(bubbleStyle);
 
+/** Remove all speech-bubble DOM nodes (e.g. after game restart). */
+export function clearSpeechBubbles() {
+  for (const el of bubbleEls.values()) {
+    el.remove();
+  }
+  bubbleEls.clear();
+}
+
 function syncBubbles() {
   const seen = new Set();
   for (const a of state.team) {
