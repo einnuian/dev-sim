@@ -6,12 +6,15 @@ build-backend = "hatchling.build"
 name = "dev-sim"
 version = "0.1.0"
 description = "CLI that uses Claude to create GitHub repos and make commits"
-requires-python = ">=3.10"
+requires-python = ">=3.9"
 dependencies = [
     "anthropic>=0.40",
+    "fastapi>=0.115",
     "httpx>=0.27",
     "openai>=1.40",
+    "pydantic>=2.0",
     "python-dotenv>=1.0",
+    "uvicorn[standard]>=0.30",
 ]
 
 [project.scripts]
