@@ -381,8 +381,11 @@ canvas#stage {
 }
 #chatdock.open { display: flex; }
 .chat-head {
-  display: flex; justify-content: space-between; align-items: center;
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
   padding: 0 4px 6px; border-bottom: 1px solid var(--line);
+}
+.chat-head-actions {
+  display: flex; align-items: center; gap: 4px; flex-shrink: 0;
 }
 .chat-title { font-size: 10px; letter-spacing: 2px; color: var(--accent-2); font-weight: 700; }
 #chatlog {

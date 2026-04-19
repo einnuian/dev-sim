@@ -128,10 +128,13 @@
     </aside>
 
     <!-- BOTTOM-LEFT: Chat with the team -->
-    <section id="chatdock" class="hud">
+    <section id="chatdock" class="hud" tabindex="-1">
       <div class="chat-head">
         <span class="chat-title">CEO -&gt; TEAM CHAT</span>
-        <button id="btn-agents-help" class="btn btn-ghost" style="font-size:10px;padding:4px 8px">Agents</button>
+        <div class="chat-head-actions">
+          <button type="button" id="btn-agents-help" class="btn btn-ghost" style="font-size:10px;padding:4px 8px">Agents</button>
+          <button type="button" id="btn-chat-hide" class="btn btn-ghost" style="font-size:10px;padding:4px 8px" title="Hide team chat">Hide</button>
+        </div>
       </div>
       <div id="chatlog"></div>
       <form id="chatform">
@@ -148,7 +151,7 @@
     </footer>
 
     <!-- floating "Chat with team" toggle -->
-    <button id="chat-toggle">[+] Chat with the team</button>
+    <button type="button" id="chat-toggle" aria-expanded="false" aria-controls="chatdock">Team chat</button>
 
     <!-- toast notifications -->
     <div id="toasts" class="hud"></div>

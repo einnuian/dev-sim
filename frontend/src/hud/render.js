@@ -808,6 +808,7 @@ export function initHud() {
   function openChat() {
     chatDock.classList.add('open');
     chatToggle.classList.add('hide');
+    chatToggle.setAttribute('aria-expanded', 'true');
     setTimeout(() => chatInput?.focus(), 50);
     if ((state.chatLog || []).length === 0) {
       pushChat('system', '', 'Tip: ask the team to build any game. Try "make me snake" or "build a flappy bird with neon colors".');
@@ -817,10 +818,22 @@ export function initHud() {
   function closeChat() {
     chatDock.classList.remove('open');
     chatToggle.classList.remove('hide');
+    chatToggle.setAttribute('aria-expanded', 'false');
   }
   chatToggle.addEventListener('click', openChat);
-  // close on Escape inside the chat
-  chatInput.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeChat(); });
+  const chatHideBtn = qs('#btn-chat-hide');
+  if (chatHideBtn) chatHideBtn.addEventListener('click', () => closeChat());
+  // close on Escape while focus is inside the chat dock
+  chatDock.addEventListener(
+    'keydown',
+    (e) => {
+      if (e.key !== 'Escape' || !chatDock.classList.contains('open')) return;
+      e.preventDefault();
+      closeChat();
+      chatToggle.focus();
+    },
+    true,
+  );
   chatForm.addEventListener('submit', (e) => {
     e.preventDefault();
     const v = chatInput.value.trim();
