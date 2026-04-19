@@ -29,6 +29,35 @@ from typing import Any, Literal, TypedDict, cast
 Severity = Literal["blocker", "major", "minor", "nit", "suggestion"]
 Verdict = Literal["approve", "request_changes", "comment_only"]
 
+# K2 / economy pipeline: fixed rubric keys (exact spelling), scores 1–10 inclusive.
+TECHNICAL_SCORE_KEYS: tuple[str, ...] = (
+    "CodeReadability",
+    "LogicComplexity",
+    "ErrorHandling",
+    "BuildStability",
+    "SecurityBestPractices",
+    "Scalability",
+    "TaskAlignment",
+    "Documentation",
+    "PerformanceEfficiency",
+    "CollaborationQuality",
+)
+
+
+class TechnicalScores(TypedDict):
+    """Staff-engineer audit rubric scores (1 = disastrous, 10 = industry standard)."""
+
+    CodeReadability: int
+    LogicComplexity: int
+    ErrorHandling: int
+    BuildStability: int
+    SecurityBestPractices: int
+    Scalability: int
+    TaskAlignment: int
+    Documentation: int
+    PerformanceEfficiency: int
+    CollaborationQuality: int
+
 
 class ReviewLocation(TypedDict, total=False):
     """Where a finding applies (paths relative to the repo / workspace clone root)."""
@@ -66,6 +95,8 @@ class CodeReviewResult(TypedDict, total=False):
 
     If ``verdict`` is ``request_changes``, the coding agent should process ``issues`` in
     severity order (blocker → major → …), then ``suggested_edits``, then ``follow_up_tasks``.
+
+    ``schema_version`` ``1.1.0`` requires ``technical_scores`` for the tycoon economy pipeline.
     """
 
     schema_version: str
@@ -74,6 +105,7 @@ class CodeReviewResult(TypedDict, total=False):
     issues: list[ReviewIssue]
     suggested_edits: list[SuggestedEdit]
     follow_up_tasks: list[str]
+    technical_scores: TechnicalScores
     review_context: str  # e.g. branch, PR, commit — opaque to the contract
 
 
@@ -84,12 +116,16 @@ class CodeReviewResult(TypedDict, total=False):
 VERDICT_ENUM = ["approve", "request_changes", "comment_only"]
 SEVERITY_ENUM = ["blocker", "major", "minor", "nit", "suggestion"]
 
+_TECH_SCORE_JSON_PROPERTIES: dict[str, Any] = {
+    k: {"type": "integer", "minimum": 1, "maximum": 10} for k in TECHNICAL_SCORE_KEYS
+}
+
 REVIEW_RESULT_JSON_SCHEMA: dict[str, Any] = {
     "type": "object",
     "additionalProperties": False,
     "description": "Structured code review for follow-up by the coding agent",
     "properties": {
-        "schema_version": {"type": "string", "const": "1.0.0"},
+        "schema_version": {"type": "string", "const": "1.1.0"},
         "summary": {"type": "string"},
         "verdict": {"type": "string", "enum": VERDICT_ENUM},
         "issues": {
@@ -133,6 +169,13 @@ REVIEW_RESULT_JSON_SCHEMA: dict[str, Any] = {
             },
         },
         "follow_up_tasks": {"type": "array", "items": {"type": "string"}},
+        "technical_scores": {
+            "type": "object",
+            "additionalProperties": False,
+            "description": "Staff engineer audit rubric (1-10 per metric) for studio simulation",
+            "required": list(TECHNICAL_SCORE_KEYS),
+            "properties": _TECH_SCORE_JSON_PROPERTIES,
+        },
         "review_context": {"type": "string"},
     },
     "required": [
@@ -142,6 +185,7 @@ REVIEW_RESULT_JSON_SCHEMA: dict[str, Any] = {
         "issues",
         "suggested_edits",
         "follow_up_tasks",
+        "technical_scores",
     ],
 }
 
@@ -160,19 +204,28 @@ class ReviewIssueD:
     suggested_fix: str = ""
 
 
+def _default_technical_scores() -> dict[str, int]:
+    return {k: 5 for k in TECHNICAL_SCORE_KEYS}
+
+
 @dataclass
 class CodeReviewResultD:
     """Build a :class:`CodeReviewResult` in code, then call :meth:`to_typed` / :meth:`to_json`."""
 
-    schema_version: str = "1.0.0"
+    schema_version: str = "1.1.0"
     summary: str = ""
     verdict: Verdict = "comment_only"
     issues: list[ReviewIssueD] = field(default_factory=list)
     suggested_edits: list[dict[str, str]] = field(default_factory=list)
     follow_up_tasks: list[str] = field(default_factory=list)
+    technical_scores: dict[str, int] = field(default_factory=_default_technical_scores)
     review_context: str = ""
 
     def to_typed(self) -> CodeReviewResult:
+        ts: TechnicalScores = cast(
+            TechnicalScores,
+            {k: int(self.technical_scores.get(k, 5)) for k in TECHNICAL_SCORE_KEYS},
+        )
         out: CodeReviewResult = {
             "schema_version": self.schema_version,
             "summary": self.summary,
@@ -182,6 +235,7 @@ class CodeReviewResultD:
                 cast(SuggestedEdit, copy.deepcopy(s)) for s in self.suggested_edits
             ],
             "follow_up_tasks": list(self.follow_up_tasks),
+            "technical_scores": ts,
         }
         if self.review_context:
             out["review_context"] = self.review_context
@@ -215,20 +269,47 @@ def format_review_json(result: CodeReviewResult) -> str:
     return json.dumps(to_plain_dict(result), indent=2, ensure_ascii=False) + "\n"
 
 
+def _coerce_technical_scores(raw: Any) -> TechnicalScores:
+    if not isinstance(raw, dict):
+        raise ValueError("technical_scores must be an object")
+    out: dict[str, int] = {}
+    for k in TECHNICAL_SCORE_KEYS:
+        v = raw.get(k)
+        if not isinstance(v, (int, float)) or isinstance(v, bool):
+            raise ValueError(f"technical_scores.{k} must be a number")
+        iv = int(v)
+        if iv < 1 or iv > 10:
+            raise ValueError(f"technical_scores.{k} must be between 1 and 10")
+        out[k] = iv
+    return cast(TechnicalScores, out)
+
+
 def parse_review_json(text: str) -> CodeReviewResult:
-    """Parse JSON text into a :class:`CodeReviewResult` (minimal validation of keys)."""
+    """Parse JSON text into a :class:`CodeReviewResult` (validates v1.1 rubric keys)."""
     data = json.loads(text)
     if not isinstance(data, dict):
         raise ValueError("review root must be a JSON object")
-    for k in ("schema_version", "summary", "verdict", "issues", "suggested_edits", "follow_up_tasks"):
+    for k in (
+        "schema_version",
+        "summary",
+        "verdict",
+        "issues",
+        "suggested_edits",
+        "follow_up_tasks",
+        "technical_scores",
+    ):
         if k not in data:
             raise ValueError(f"missing required key: {k}")
+    if str(data.get("schema_version")) != "1.1.0":
+        raise ValueError("schema_version must be 1.1.0")
+    data["technical_scores"] = _coerce_technical_scores(data.get("technical_scores"))
     return cast(CodeReviewResult, data)
 
 
 __all__ = [
     "SEVERITY_ENUM",
     "VERDICT_ENUM",
+    "TECHNICAL_SCORE_KEYS",
     "REVIEW_RESULT_JSON_SCHEMA",
     "CodeReviewResult",
     "CodeReviewResultD",
@@ -237,6 +318,7 @@ __all__ = [
     "ReviewLocation",
     "Severity",
     "SuggestedEdit",
+    "TechnicalScores",
     "Verdict",
     "format_review_json",
     "parse_review_json",

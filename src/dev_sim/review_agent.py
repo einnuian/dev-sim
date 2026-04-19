@@ -19,20 +19,45 @@ from openai import OpenAI
 from dev_sim.agent_progress import AgentProgressLogger, ProgressAnnouncer
 from dev_sim.config import K2_API_BASE, get_k2_api_key
 
+# Must match shared/review_schema.TECHNICAL_SCORE_KEYS (economy + audit rubric).
+TECHNICAL_SCORE_KEYS: tuple[str, ...] = (
+    "CodeReadability",
+    "LogicComplexity",
+    "ErrorHandling",
+    "BuildStability",
+    "SecurityBestPractices",
+    "Scalability",
+    "TaskAlignment",
+    "Documentation",
+    "PerformanceEfficiency",
+    "CollaborationQuality",
+)
+
+_TECH_SCORE_JSON_EXAMPLE = ",\n  ".join(f'"{k}": <1-10 integer>' for k in TECHNICAL_SCORE_KEYS)
+
 STRUCTURED_OUTPUT_INSTRUCTION = (
     "Respond with a **single** JSON object only, no markdown fences, with keys: "
-    "schema_version (string, use \"1.0.0\"), summary, verdict (one of "
+    'schema_version (string, use "1.1.0"), summary, verdict (one of '
     "approve, request_changes, comment_only), issues (array of objects with "
     "severity, title, detail, suggested_fix, optional location {path, start_line, end_line, label}), "
     "suggested_edits (array of {path, instruction, optional snippet}), "
-    "follow_up_tasks (string array), optional review_context. "
+    "follow_up_tasks (string array), "
+    "technical_scores (object — REQUIRED), optional review_context. "
+    "The technical_scores object MUST contain exactly these 10 keys, each an integer from 1 to 10 "
+    "(1 = disastrous or missing, 10 = flawless / industry standard): "
+    + ", ".join(TECHNICAL_SCORE_KEYS)
+    + ". Example shape for technical_scores (replace placeholders with integers 1-10):\n"
+    "{\n  "
+    + _TECH_SCORE_JSON_EXAMPLE
+    + "\n}\n"
     "Set suggested_fix to concrete, imperative text for a coding agent. "
     "List issues in severity order: blocker, major, minor, nit, suggestion."
 )
 
 
-REVIEW_SYSTEM_PROMPT = f"""You are a senior code reviewer. Review the pull request for correctness,
-security, performance, and maintainability. {STRUCTURED_OUTPUT_INSTRUCTION}"""
+REVIEW_SYSTEM_PROMPT = f"""You are a Senior Staff Engineer acting as a technical auditor for a software studio simulation. In addition to your standard review, you MUST grade the provided code across 10 specific technical metrics. Score each metric strictly from 1 to 10 (1 = disastrous/missing, 10 = flawless/industry-standard). Pay special attention to 'SecurityBestPractices' and 'ErrorHandling', as poor scores here will cause critical production outages.
+
+Review the pull request for correctness, security, performance, and maintainability. {STRUCTURED_OUTPUT_INSTRUCTION}"""
 
 
 def _gh_headers(token: str) -> dict[str, str]:
@@ -128,7 +153,11 @@ def _raw_decode_object_at(s: str, i: int) -> dict[str, Any] | None:
 
 
 def _try_parse_review_json(text: str) -> dict[str, Any] | None:
-    """Parse the CodeReviewResult object from the model, anchored on top-level ``schema_version``."""
+    """Parse the CodeReviewResult object from the model, anchored on top-level ``schema_version``.
+
+    Callers should run :func:`_finalize_code_review_result` on the returned dict so
+    ``technical_scores`` and ``schema_version`` ``1.1.0`` are guaranteed for the economy pipeline.
+    """
     t = text.strip()
     if "schema_version" in t and '"schema_version"' in t:
         # Try from last `{"schema_version"…` first (K2-Think: final object after long thinking).
@@ -161,6 +190,44 @@ def _try_parse_review_json(text: str) -> dict[str, Any] | None:
     return o4 if isinstance(o4, dict) else None
 
 
+def _coerce_score_1_10(value: Any) -> int:
+    """Normalize a model-provided score to an int in 1..10."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return 5
+    iv = int(round(float(value)))
+    if iv < 1:
+        return 1
+    if iv > 10:
+        return 10
+    return iv
+
+
+def _finalize_code_review_result(obj: dict[str, Any]) -> dict[str, Any]:
+    """Ensure ``technical_scores`` exists and ``schema_version`` is v1.1 for downstream tooling.
+
+    Accepts legacy ``1.0.0`` payloads by synthesizing missing rubric scores (default mid-range).
+    Mutates ``obj`` in place and returns it.
+    """
+    raw_ts = obj.get("technical_scores")
+    scores: dict[str, int] = {}
+    if isinstance(raw_ts, dict):
+        for k in TECHNICAL_SCORE_KEYS:
+            scores[k] = _coerce_score_1_10(raw_ts.get(k))
+    else:
+        scores = {k: 5 for k in TECHNICAL_SCORE_KEYS}
+
+    obj["technical_scores"] = scores
+
+    sv = str(obj.get("schema_version", "")).strip()
+    if sv == "1.0.0" or not sv:
+        obj["schema_version"] = "1.1.0"
+    elif sv != "1.1.0":
+        # Unknown version: normalize to current contract for the economy pipeline.
+        obj["schema_version"] = "1.1.0"
+
+    return obj
+
+
 def format_review_markdown(review: dict[str, Any], include_json: bool) -> str:
     """Build GitHub-Flavored Markdown for the PR issue comment from parsed JSON."""
     v = str(review.get("verdict", "comment_only"))
@@ -171,6 +238,25 @@ def format_review_markdown(review: dict[str, Any], include_json: bool) -> str:
     ]
     if sm:
         parts.append("\n" + sm + "\n")
+
+    ts = review.get("technical_scores")
+    if isinstance(ts, dict):
+        parts.append("\n#### Staff Engineer Audit Rubric\n\n")
+        parts.append("| Metric | Score |\n")
+        parts.append("|:-------|------:|\n")
+        numeric: list[int] = []
+        for key in TECHNICAL_SCORE_KEYS:
+            cell = ts.get(key, "—")
+            if isinstance(cell, (int, float)) and not isinstance(cell, bool):
+                iv = int(round(float(cell)))
+                numeric.append(max(1, min(10, iv)))
+                parts.append(f"| **{key}** | {iv} / 10 |\n")
+            else:
+                parts.append(f"| **{key}** | — |\n")
+        if numeric:
+            avg = sum(numeric) / len(numeric)
+            parts.append(f"\n*Average technical score: **{avg:.2f}** / 10*\n")
+
     for i, isu in enumerate(review.get("issues") or [], 1):
         if not isinstance(isu, dict):
             continue
@@ -345,6 +431,7 @@ def compute_k2_pr_review(
 
         review_obj = _try_parse_review_json(raw)
         if review_obj:
+            _finalize_code_review_result(review_obj)
             comment_body = format_review_markdown(review_obj, include_json=include_json_in_comment)
         else:
             comment_body = f"### Automated code review (K2 / dev-sim)\n\n" + (
@@ -410,6 +497,7 @@ def run_k2_pr_review(
 
 
 __all__ = [
+    "TECHNICAL_SCORE_KEYS",
     "compute_k2_pr_review",
     "fetch_pr_diff",
     "fetch_pr_metadata",
