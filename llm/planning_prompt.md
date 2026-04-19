@@ -15,3 +15,5 @@ Start with a one-paragraph summary describing the project, the total number of s
 
 Tone and specificity
 Be concrete and actionable. Avoid vague bullets like "build the API." Instead name the endpoints, the entities, and the fields. If the product description of the project is ambiguous, list your assumptions in plain text at the top of the plan before you start the sprint breakdown. Every task must be written so that a coding agent reading it in isolation has enough detail to start coding immediately.
+
+KEEP YOUR RESPONSES AS CONCISE AS POSSIBLE WHILE MAINTAINING DETAIL. TRUST THE AGENTS TO MAKE THEIR OWN SPECIFIC DECISIONS.

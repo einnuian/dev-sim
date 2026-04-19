@@ -18,6 +18,8 @@ dependencies = [
 dev-sim = "dev_sim.cli:main"
 dev-sim-review = "dev_sim.review_cli:main"
 dev-sim-orchestrate = "dev_sim.orchestrate:main"
+dev-sim-plan = "dev_sim.planner:main"
+dev-sim-run = "dev_sim.runner:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dev_sim"]
